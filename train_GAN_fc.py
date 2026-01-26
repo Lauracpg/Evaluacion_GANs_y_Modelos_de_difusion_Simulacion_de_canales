@@ -14,7 +14,7 @@ parser.add_argument('--epochs', type=int, default=100, help='Número de épocas 
 parser.add_argument('--batch_size', type=int, default=32, help='Tamaño del batch')
 parser.add_argument('--z_dim', type=int, default=32, help='Dimensión del vector de ruido del generador')
 parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
-parser.add_argument('--save_dir', type=str, default='checkpoints/fc', help='Carpeta donde guardar checkpoints')
+parser.add_argument('--save_dir', type=str, default='checkpoints/conv1D', help='Carpeta donde guardar checkpoints')
 parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
 args = parser.parse_args()
 
@@ -225,7 +225,7 @@ plt.savefig(os.path.join(args.save_dir, 'comparacion_real_vs_generada.png'))
 plt.show()
 
 # modelo mejor guardado
-checkpoint = torch.load('checkpoints/fc/model_best.pth', map_location='cpu')
+checkpoint = torch.load('checkpoints/conv1D/model_best.pth', map_location='cpu')
 print(f"Modelo guardado en la época: {checkpoint['epoch']}")
 print(f"Pérdida del generador (G_loss): {checkpoint['G_loss']:.4f}")
 print(f"Pérdida del discriminador (D_loss): {checkpoint['D_loss']:.4f}")

@@ -14,13 +14,17 @@ parser.add_argument('--epochs', type=int, default=100, help='Número de épocas 
 parser.add_argument('--batch_size', type=int, default=32, help='Tamaño del batch')
 parser.add_argument('--z_dim', type=int, default=32, help='Dimensión del vector de ruido del generador')
 parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
-parser.add_argument('--save_dir', type=str, default='checkpoints/fc', help='Carpeta donde guardar checkpoints')
+parser.add_argument('--save_dir', type=str, default='checkpoints/GAN_Conv1D', help='Carpeta donde guardar checkpoints')
 parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
 args = parser.parse_args()
 
 # dispositivo (GPU si está disponible)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 os.makedirs(args.save_dir, exist_ok=True)
+
+patience = 10
+stable_epochs = 0
+best_epoch = 0
 
 ### Cargar dataset ###
 data = np.load(args.data).astype(np.float32)
@@ -181,11 +185,17 @@ for epoch in range(1, args.epochs + 1):
 
     # Guardar mejor modelo (según menor G_loss)
     if 0.4 < d_loss_avg < 0.8:
-        torch.save(
-            {'G': G.state_dict(), 'D': D.state_dict(),
-             'epoch': epoch, 'G_loss': g_loss_avg, 'D_loss': d_loss_avg},
-            os.path.join(args.save_dir, 'model_stable.pth')
-        )
+        stable_epochs += 1
+    else:
+        stable_epochs = 0
+
+    if stable_epochs == 1:
+        best_epoch = epoch
+
+    if stable_epochs >= patience:
+        print(f"\nEarly activated at epoch {epoch}.")
+        print(f"Modelo estable desde la época {best_epoch}")
+        break
 
 ### Guardar modelo final y muestras generadas ###
 # guardar pesos finales
