@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 
 from train_Diffusion_Model import UNet1D, DDPM
-#from train_GAN_fc import Generator
 from train_GAN_Conv1D import Generator
 
 def compute_energy(signals):
@@ -151,22 +150,18 @@ def generate_signals(model_type, model_checkpoint, num_samples,
                 # Inicialización desde ruido gaussiano puro
                 x = torch.randn(1, 1, L, device=device)
 
-                # Proceso inverso de difusión:
-                # eliminar ruido paso a paso desde t=T-1 hasta t=0
+                # Proceso inverso de difusión: eliminar ruido paso a paso
+                # desde t=T-1 hasta t=0
                 for t in reversed(range(ddpm.T)):
-                    noise_pred = ddpm.model(
-                        x,
-                        torch.tensor([t], device=device)
-                    )
+                    noise_pred = ddpm.model(x,torch.tensor([t], device=device))
                     beta = ddpm.betas[t]
-
                     # ecuación de muestreo DDPM (simplificada)
-                    x = (1 / torch.sqrt(1-beta) * (x - beta
-                                                   / torch.sqrt(1 - ddpm.alphas_cumprod[t])
-                                                   * noise_pred))
-                    # guardar señal final x_0
-                    fake.append(x.squeeze().cpu().numpy())
-            fake = np.array(fake)
+                    x = (1 / torch.sqrt(1-beta) * (
+                        x - beta / torch.sqrt(1 - ddpm.alphas_cumprod[t]) * noise_pred)
+                    )
+                # guardar señal final x_0
+                fake.append(x.squeeze().cpu().numpy())
+        fake = np.array(fake)
     else:
         raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
 
