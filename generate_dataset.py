@@ -3,7 +3,6 @@ import os
 import h5py
 from matplotlib import pyplot as plt
 
-
 def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
     print(f"Cargando archivo {mat_path} ...")
     f = h5py.File(mat_path, "r")
@@ -65,10 +64,11 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
         # convertir a magnitud
         H_mag = np.abs(H_crop)
 
-        # normalizar cada canal
+        # normalizar cada canal a [-1,1]
         max_vals = np.max(H_mag, axis=1, keepdims=True)
         print("Primeros 5 valores max por canal:", max_vals[:5].flatten())
-        H_mag = H_mag/(max_vals + 1e-12)
+        H_mag = H_mag/(max_vals + 1e-12) # [0,1]
+        H_mag = 2 * H_mag - 1 # [-1,1]
 
         print("Rango final: min =", H_mag.min(), " max =", H_mag.max())
         all_channels.append(H_mag.astype(np.float32))

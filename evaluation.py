@@ -160,7 +160,9 @@ def generate_signals(model_type, model_checkpoint, num_samples,
                         x - beta / torch.sqrt(1 - ddpm.alphas_cumprod[t]) * noise_pred)
                     )
                 # guardar señal final x_0
-                fake.append(x.squeeze().cpu().numpy())
+                x0 = x.squeeze()
+                x0= torch.clamp(x0, -1, 1) # [-1,1]
+                fake.append(x0.cpu().numpy())
         fake = np.array(fake)
     else:
         raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
@@ -205,12 +207,34 @@ def main(args):
 
     # Histograma de magnitudes
     plt.figure(figsize=(8, 4))
+    plt.bar(metrics['bins_real'],metrics['hist_real'],width=0.03, alpha=0.6, label="Real")
+    plt.bar(metrics['bins_fake'], metrics['hist_fake'], width=0.03, alpha=0.6, label="Generado")
+    plt.title("Histograma de magnitudes")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.save_dir, 'histograma.png'))
+
+    # Gráfico PSD
+    plt.figure(figsize=(8, 4))
     plt.semilogy(metrics['freqs'], metrics['psd_real'], label='Real')
     plt.semilogy(metrics['freqs'],metrics['psd_fake'], label='Generado')
     plt.title("PSD Real vs Generado")
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(args.save_dir, "psd.png"))
+
+    # Señales reales vs generadas (8)
+    num_plot = min(8, args.num_eval)
+    plt.figure(figsize=(12, 6))
+    for i in range(num_plot):
+        plt.subplot(4,2,i+1)
+        plt.plot(real_eval[i], label='Real')
+        plt.plot(fake_eval[i], '--',label='Generado')
+        plt.xticks([]); plt.yticks([])
+    plt.suptitle(f"Comparación señales reales vs {args.model_type.upper()}")
+    plt.legend(loc='upper right', fontsize=8)
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.save_dir, "real_vs_generada.png"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
