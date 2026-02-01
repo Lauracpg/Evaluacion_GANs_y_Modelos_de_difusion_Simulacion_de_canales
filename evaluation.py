@@ -3,6 +3,9 @@ import numpy as np
 import torch
 import os
 import matplotlib.pyplot as plt
+from scipy.signal import welch
+
+from train_Diffusion_Model import UNet1D, DDPM
 #from train_GAN_fc import Generator
 from train_GAN_Conv1D import Generator
 
@@ -35,7 +38,6 @@ def compute_pdp(signals):
     power = np.abs(signals) ** 2
     return np.mean(power, axis=0)
 
-
 def compute_average_delay(signals):
     N, L = signals.shape
     delays = np.arange(L)
@@ -43,7 +45,6 @@ def compute_average_delay(signals):
     num = np.sum(delays * power)
     den = np.sum(power) + 1e-12
     return num / den
-
 
 def compute_rms_delay_spread(signals):
     N, L = signals.shape
@@ -53,6 +54,15 @@ def compute_rms_delay_spread(signals):
     num = np.sum(power * (delays - avg_delay) ** 2)
     den = np.sum(power) + 1e-12
     return np.sqrt(num / den)
+
+def compute_psd(signals, fs=1.0):
+    """PSD promedio de las señales"""
+    psds = []
+    for s in signals:
+        f, Pxx = welch(s, fs=fs, nperseg=min(128,len(s)))
+        psds.append(Pxx)
+    psds = np.array(psds)
+    return np.mean(psds, axis=0), f
 
 def mae(a, b):
     return np.mean(np.abs(a - b))
@@ -91,98 +101,133 @@ def evaluate_metrics(real, fake):
     metrics['hist_real'], metrics['bins_real'] = compute_histogram(real)
     metrics['hist_fake'], metrics['bins_fake'] = compute_histogram(fake)
 
+    # PSD
+    metrics['psd_real'], metrics['freqs'] = compute_psd(real)
+    metrics['psd_fake'], _ = compute_psd(fake)
+    metrics['psd_mae'] = mae(metrics['psd_real'], metrics['psd_fake'])
+
+    # Diversidad: std de energía por muestra
+    metrics['diversity_fake'] = np.std(metrics['energy_fake'])
+    metrics['diversity_real'] = np.std(metrics['energy_real'])
     return metrics
 
-###############################################################
-# ARCHIVO PRINCIPAL (EVALUACIÓN)
-###############################################################
+def generate_signals(model_type, model_checkpoint, num_samples,
+                     device, z_dim=32, L=128,
+                     ddpm_steps=1000):
+    """
+    Genera señales sintéticas de canal utilizando un modelo ya entrenado,
+    sin alterar los pesos ni la distribución aprendida.
+    Para obtener señales falsas comparables con las reales.
+    Return:
+    array (num_samples, L) con las señales generadas (normalizadas en [-1,1]).
+    """
+    # DCGAN: Generación directa a partir de ruido latente z
+    if model_type == 'dcgan':
+        # cargar checkpoint y reconstruir el generador
+        checkpoint = torch.load(model_checkpoint, map_location=device)
+        G = Generator(z_dim=z_dim, L=L).to(device)
+        G.load_state_dict(checkpoint['G'])
+        G.eval()
 
+        # Muestreo directo: x = G(z)
+        with torch.no_grad():
+            z = torch.randn(num_samples, z_dim, device=device)
+            fake = G(z).cpu().numpy()
+    # DDPM: generación mediante proceso inverso de difusión
+    elif model_type == 'ddpm':
+        # cargar U-Net entrenada
+        checkpoint = torch.load(model_checkpoint, map_location=device)
+        unet = UNet1D(L=L).to(device)
+        unet.load_state_dict(checkpoint)
+
+        # reconstruir DDPM con el mismo número de pasos T
+        ddpm = DDPM(unet, T=ddpm_steps).to(device)
+        ddpm.model.eval()
+
+        fake = []
+
+        with torch.no_grad():
+            for _ in range(num_samples):
+                # Inicialización desde ruido gaussiano puro
+                x = torch.randn(1, 1, L, device=device)
+
+                # Proceso inverso de difusión:
+                # eliminar ruido paso a paso desde t=T-1 hasta t=0
+                for t in reversed(range(ddpm.T)):
+                    noise_pred = ddpm.model(
+                        x,
+                        torch.tensor([t], device=device)
+                    )
+                    beta = ddpm.betas[t]
+
+                    # ecuación de muestreo DDPM (simplificada)
+                    x = (1 / torch.sqrt(1-beta) * (x - beta
+                                                   / torch.sqrt(1 - ddpm.alphas_cumprod[t])
+                                                   * noise_pred))
+                    # guardar señal final x_0
+                    fake.append(x.squeeze().cpu().numpy())
+            fake = np.array(fake)
+    else:
+        raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
+
+    return fake
+
+# MAIN
 def main(args):
     print("\n=== Cargando datos reales ===")
     data = np.load(args.data).astype(np.float32)
     real_eval = data[:args.num_eval]  # primeras N señales
     print("Dataset cargado:", data.shape)
 
-    print("\n=== Cargando modelo entrenado ===")
-    checkpoint = torch.load(args.model, map_location=args.device)
-    G_state = checkpoint["G"]
+    print(f"\n=== Generando señales con {args.model_type.upper()} ===")
+    fake_eval = generate_signals(
+        args.model_type,args.model, args.num_eval,args.device,
+        z_dim=args.z_dim, L=args.L,ddpm_steps=args.ddpm_steps
+    )
+    print("Señales generadas:", fake_eval.shape)
 
-    # Cargar generador
-    G = Generator(z_dim=args.z_dim, out_dim=args.L).to(args.device)
-    G.load_state_dict(G_state)
-    G.eval()
-    print("Modelo cargado correctamente.")
-
-    print("\n=== Generando señales falsas para evaluación ===")
-    with torch.no_grad():
-        z = torch.randn(args.num_eval, args.z_dim, device=args.device)
-        fake_eval = G(z).cpu().numpy()
-    print("Listo. Real vs Fake shapes:", real_eval.shape, fake_eval.shape)
-
-    # Calcular métricas
-    print("\n=== Calculando métricas ===")
+    # calcular métricas
     metrics = evaluate_metrics(real_eval, fake_eval)
 
     print("\n--- RESULTADOS ---")
-    print(f"PDP MAE = {metrics['pdp_mae']:.6f}")
-    print(f"Average Delay MAE = {metrics['avg_delay_mae']:.6f}")
-    print(f"RMS Delay Spread MAE = {metrics['rms_mae']:.6f}")
-    print(f"Energía total MAE = {metrics['energy_mae']:.6f}")
-    print(f"Std por tap MAE = {metrics['std_mae']:.6f}")
-    print(f"Autocorrelación MAE = {metrics['autocorr_mae']:.6f}")
+    for key in ['pdp_mae', 'avg_delay_mae', 'rms_mae','energy_mae',
+                'std_mae', 'autocorr_mae', 'psd_mae']:
+        print(f"{key}: {metrics[key]:.6f}")
+    print(f"Diversidad fake: {metrics['diversity_fake']:.6f}")
 
     # Guardar resultados
     os.makedirs(args.save_dir, exist_ok=True)
-    with open(os.path.join(args.save_dir, "metricas_gan.txt"), "w") as f:
-        f.write("=== Métricas clásicas ===\n")
-        f.write(f"PDP MAE: {metrics['pdp_mae']}\n")
-        f.write(f"Average Delay MAE: {metrics['avg_delay_mae']}\n")
-        f.write(f"RMS Delay Spread MAE: {metrics['rms_mae']}\n")
-        f.write("\n=== Métricas adicionales ===\n")
-        f.write(f"Energía total MAE: {metrics['energy_mae']}\n")
-        f.write(f"Std por tap MAE: {metrics['std_mae']}\n")
-        f.write(f"Autocorrelación MAE: {metrics['autocorr_mae']}\n")
-    print("\nMétricas guardadas en metricas_gan.txt")
+    np.save(os.path.join(args.save_dir, 'metrics.npy'), metrics)
 
     # Gráfico PDP
     plt.figure(figsize=(8, 4))
     plt.plot(metrics['pdp_real'], label="Real")
     plt.plot(metrics['pdp_fake'], label="Generado")
     plt.title("PDP Real vs Generado")
-    plt.xlabel("Delay (muestra)")
-    plt.ylabel("Potencia promedio")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(args.save_dir, "pdp_comparacion.png"))
-    print("Gráfico PDP guardado en pdp_comparacion.png")
+    plt.savefig(os.path.join(args.save_dir, 'pdp.png'))
 
     # Histograma de magnitudes
     plt.figure(figsize=(8, 4))
-    plt.bar(metrics['bins_real'], metrics['hist_real'], width=(metrics['bins_real'][1] - metrics['bins_real'][0]),
-            alpha=0.5, label="Real")
-    plt.bar(metrics['bins_fake'], metrics['hist_fake'], width=(metrics['bins_fake'][1] - metrics['bins_fake'][0]),
-            alpha=0.5, label="Generado")
-    plt.title("Distribución de magnitudes |h[n]|")
-    plt.xlabel("Magnitud")
-    plt.ylabel("Densidad")
+    plt.semilogy(metrics['freqs'], metrics['psd_real'], label='Real')
+    plt.semilogy(metrics['freqs'],metrics['psd_fake'], label='Generado')
+    plt.title("PSD Real vs Generado")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(args.save_dir, "histograma_magnitudes.png"))
-    print("Histograma de magnitudes guardado en histograma_magnitudes.png")
-
-###############################################################
-# ARGUMENTOS
-###############################################################
+    plt.savefig(os.path.join(args.save_dir, "psd.png"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="data/dataset_nist.npy")
-    parser.add_argument("--model", type=str, default="checkpoints/fc/model_best.pth")
+    parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--model_type", type=str, choices=['dcgan', 'ddpm'], default='dcgan')
     parser.add_argument("--save_dir", type=str, default="eval_results")
     parser.add_argument("--z_dim", type=int, default=32)
     parser.add_argument("--L", type=int, default=128)
-    parser.add_argument("--num_eval", type=int, default=5000)
+    parser.add_argument("--num_eval", type=int, default=500)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--ddpm_steps", type=int, default=1000)
     args = parser.parse_args()
     main(args)
 

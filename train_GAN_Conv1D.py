@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from matplotlib import pyplot as plt
 from torch import nn
+from torch.nn.utils import spectral_norm
 from torch.utils.data import TensorDataset, DataLoader
 
 ### Parámetros de ejecución ###
@@ -78,18 +79,18 @@ class Discriminator(nn.Module):
     def __init__(self, L):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv1d(1, 32, 4, 2, 1),
+            spectral_norm(nn.Conv1d(1, 32, 4, 2, 1)),
             nn.LeakyReLU(0.2),
 
-            nn.Conv1d(32, 64, 4, 2, 1),
-            nn.BatchNorm1d(64),
+            spectral_norm(nn.Conv1d(32, 64, 4, 2, 1)),
+            #nn.BatchNorm1d(64),
             nn.LeakyReLU(0.2),
 
-            nn.Conv1d(64, 128, 4, 2, 1),
-            nn.BatchNorm1d(128),
+            spectral_norm(nn.Conv1d(64, 128, 4, 2, 1)),
+            #nn.BatchNorm1d(128),
             nn.LeakyReLU(0.2),
         )
-        self.fc = nn.Linear(128 * (L // 8), 1)
+        self.fc = spectral_norm(nn.Linear(128 * (L // 8), 1))
 
     def forward(self, x):
         x = x.unsqueeze(1)
