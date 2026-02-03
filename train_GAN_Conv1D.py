@@ -16,6 +16,9 @@ parser.add_argument('--z_dim', type=int, default=32, help='Dimensión del vector
 parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
 parser.add_argument('--save_dir', type=str, default='checkpoints/GAN_Conv1D', help='Carpeta donde guardar checkpoints')
 parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
+parser.add_argument('--patience', type=int, default=10, help='Paciencia para early stopping')
+parser.add_argument('--min_delta', type=float, default=1e-4, help='Mejora mínima en G_loss')
+
 args = parser.parse_args()
 
 # dispositivo (GPU si está disponible)
@@ -91,20 +94,15 @@ def weights_init(m):
 # Crear instancias de ambos modelos
 G = Generator(args.z_dim, args.L).to(device)
 D = Discriminator(args.L).to(device)
-
 G.apply(weights_init)
 D.apply(weights_init)
 
 ### Definir pérdidas y optimizadores de G y D (LSGAN) ###
 # pérdida LSGAN
 criterion = nn.MSELoss()
-
 # optimizadores Adam para G y D
 optD = torch.optim.Adam(D.parameters(), lr=args.lr, betas=(0.5, 0.999))
 optG = torch.optim.Adam(G.parameters(), lr=args.lr, betas=(0.5, 0.999))
-
-# vector de ruido fijo para ver la evolución del generador
-fixed_z = torch.randn(16, args.z_dim, device=device)
 
 ### Bucle del ENTRENAMIENTO principal ###
 # en cada iter:
@@ -112,6 +110,7 @@ fixed_z = torch.randn(16, args.z_dim, device=device)
 #   - luego el generador (G)
 #   - guardar las pérdidas promedio por época
 best_g_loss = float('inf')
+epochs_no_improve = 0
 for epoch in range(1, args.epochs + 1):
     g_loss_avg = 0.0
     d_loss_avg = 0.0
@@ -163,14 +162,21 @@ for epoch in range(1, args.epochs + 1):
         print(f"Epoch {epoch}/{args.epochs} | G_loss={g_loss_avg:.4f} | D_loss={d_loss_avg:.4f}")
 
     # Guardar mejor modelo (según menor G_loss)
-    if g_loss_avg < best_g_loss:
+    if g_loss_avg < best_g_loss - args.min_delta:
         best_g_loss = g_loss_avg
+        epochs_no_improve = 0
         torch.save(
             {'G': G.state_dict(), 'D': D.state_dict(), 'epoch': epoch,
              'G_loss': g_loss_avg, 'D_loss': d_loss_avg},
             os.path.join(args.save_dir, 'model_best.pth')
         )
-        print(f"Nuevo mejor modelo guardado en la época {epoch} | G_loss={g_loss_avg:.4f}")
+        print(f"Nuevo mejor modelo en la época {epoch} | G_loss={g_loss_avg:.4f}")
+    else:
+        epochs_no_improve += 1
+
+    if epochs_no_improve >= args.patience:
+        print(f"Early stopping at epoch {epoch} (sin mejora en {args.patience} épocas)")
+        break
 
 print("Entrenamiento completado. Modelos guardados en", args.save_dir)
 print(f"Mejor G_loss: {best_g_loss:.4f}")
