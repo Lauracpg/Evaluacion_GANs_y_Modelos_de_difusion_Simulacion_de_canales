@@ -29,9 +29,6 @@ best_epoch = 0
 
 ### Cargar dataset ###
 data = np.load(args.data).astype(np.float32)
-data = data / (np.max(np.abs(data), axis=1, keepdims=True) + 1e-12)
-# normalizar a [-1,1]
-data = 2*data - 1
 
 # convertir a tensores de PyTorch y crear un DataLoader
 dataset = TensorDataset(torch.from_numpy(data))
@@ -128,6 +125,7 @@ fixed_z = torch.randn(16, args.z_dim, device=device)
 #   - entrenar primero discriminador (D)
 #   - luego el generador (G)
 #   - guardar las pérdidas promedio por época
+best_g_loss = float('inf')
 for epoch in range(1, args.epochs + 1):
     g_loss_avg = 0.0
     d_loss_avg = 0.0
@@ -177,40 +175,27 @@ for epoch in range(1, args.epochs + 1):
     # mostrar cada 20 épocas
     if epoch % 20 == 0 or epoch == 1:
         print(f"Epoch {epoch}/{args.epochs} | G_loss={g_loss_avg:.4f} | D_loss={d_loss_avg:.4f}")
-        # guardar checkpoint con pesos de los modelos
+
+    # Guardar mejor modelo (según menor G_loss)
+    if g_loss_avg < best_g_loss:
+        best_g_loss = g_loss_avg
         torch.save(
             {'G': G.state_dict(), 'D': D.state_dict(), 'epoch': epoch,
              'G_loss': g_loss_avg, 'D_loss': d_loss_avg},
-            os.path.join(args.save_dir, f'model_e{epoch}.pth')
+            os.path.join(args.save_dir, 'model_best.pth')
         )
+        print(f"Nuevo mejor modelo guardao en la época {epoch} | G_loss={g_loss_avg:.4f}")
 
-    # Guardar mejor modelo (según menor G_loss)
-    if 0.4 < d_loss_avg < 0.8:
-        stable_epochs += 1
-    else:
-        stable_epochs = 0
-
-    if stable_epochs == 1:
-        best_epoch = epoch
-
-    if stable_epochs >= patience:
-        print(f"\nEarly activated at epoch {epoch}.")
-        print(f"Modelo estable desde la época {best_epoch}")
-        break
-
-### Guardar modelo final y muestras generadas ###
-# guardar pesos finales
-torch.save(
-{'G': G.state_dict(), 'D': D.state_dict(), 'epoch': args.epochs},
-    os.path.join(args.save_dir, 'model_final.pth')
-)
-
-# guardar ejemplos generados con ruido fijo
+checkpoint = torch.load(os.path.join(args.save_dir, 'model_best.pth'), map_location=device)
+G.load_state_dict(checkpoint['G'])
+D.load_state_dict(checkpoint['D'])
 G.eval()
+print(f"Mejor modelo cargado de la época {checkpoint['epoch']} | G_loss={checkpoint['G_loss']:.4f}")
+
 with torch.no_grad():
     samples = G(fixed_z).cpu().numpy()
 
-np.save(os.path.join(args.save_dir, 'fixed_samples.npy'), samples)
+np.save(os.path.join(args.save_dir, 'fixed_samples_best.npy'), samples)
 print("Entrenamiento completado. Modelos guardados en", args.save_dir)
 
 # Visualizar algunas señales generadas
@@ -218,39 +203,39 @@ plt.figure(figsize=(10, 6))
 for i in range(8):
     plt.subplot(4, 2, i+1)
     plt.plot(samples[i], '--', color='orange', alpha=0.8, label='Generada')
-    plt.title(f'Señal generada {i+1}')
+    plt.title(f'Señal generada {i+1} (mejor modelo)')
     plt.xticks([]); plt.yticks([])
 plt.tight_layout()
 plt.show()
 
 print("\nVisualizando lo aprendido por el modelo final...")
 
-# Generar nuevas señales
-z_vis = torch.randn(8, args.z_dim, device=device)
-with torch.no_grad():
-    generated = G(z_vis).cpu().numpy()
-
-# Seleccionar señales reales para comparar
-num_examples = 8
-real_examples = data[:num_examples]
-
-# Comparar gráficamente modelo final
-plt.figure(figsize=(12, 8))
-for i in range(num_examples):
-    plt.subplot(4, 2, i + 1)
-    plt.plot(real_examples[i], color='blue', alpha=0.7, label='Real')
-    plt.plot(generated[i], color='orange', linestyle='--', alpha=0.8, label='Generada')
-    plt.title(f"Comparación señal {i + 1}")
-    plt.xticks([]); plt.yticks([])
-plt.tight_layout()
-plt.legend(loc='upper right', fontsize=8)
-plt.suptitle("Comparación de señales reales vs generadas (modelo final)", fontsize=14, y=1.02)
-
-plt.savefig(os.path.join(args.save_dir, 'comparacion_real_vs_generada.png'))
-plt.show()
+# # Generar nuevas señales
+# z_vis = torch.randn(8, args.z_dim, device=device)
+# with torch.no_grad():
+#     generated = G(z_vis).cpu().numpy()
+#
+# # Seleccionar señales reales para comparar
+# num_examples = 8
+# real_examples = data[:num_examples]
+#
+# # Comparar gráficamente modelo final
+# plt.figure(figsize=(12, 8))
+# for i in range(num_examples):
+#     plt.subplot(4, 2, i + 1)
+#     plt.plot(real_examples[i], color='blue', alpha=0.7, label='Real')
+#     plt.plot(generated[i], color='orange', linestyle='--', alpha=0.8, label='Generada')
+#     plt.title(f"Comparación señal {i + 1}")
+#     plt.xticks([]); plt.yticks([])
+# plt.tight_layout()
+# plt.legend(loc='upper right', fontsize=8)
+# plt.suptitle("Comparación de señales reales vs generadas (modelo final)", fontsize=14, y=1.02)
+#
+# plt.savefig(os.path.join(args.save_dir, 'comparacion_real_vs_generada.png'))
+# plt.show()
 
 # modelo mejor guardado
-checkpoint = torch.load('checkpoints/fc/model_best.pth', map_location='cpu')
+checkpoint = torch.load(os.path.join(args.save_dir, 'model_best.pth'), map_location='cpu')
 print(f"Modelo guardado en la época: {checkpoint['epoch']}")
 print(f"Pérdida del generador (G_loss): {checkpoint['G_loss']:.4f}")
 print(f"Pérdida del discriminador (D_loss): {checkpoint['D_loss']:.4f}")

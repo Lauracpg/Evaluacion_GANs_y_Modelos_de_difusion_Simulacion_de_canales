@@ -194,9 +194,8 @@ def train():
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(args.save_dir, exist_ok=True)
-    # cargar dataset y normalizar a [-1,1]
+    # cargar dataset
     data = np.load('data/dataset_nist.npy')
-    data = 2 * data - 1
     data = torch.from_numpy(data).float().unsqueeze(1)
 
     loader = DataLoader(
