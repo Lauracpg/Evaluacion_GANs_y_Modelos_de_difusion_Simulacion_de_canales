@@ -3,7 +3,6 @@ import os
 
 import numpy as np
 import torch
-from matplotlib import pyplot as plt
 from torch import nn
 from torch.nn.utils import spectral_norm
 from torch.utils.data import TensorDataset, DataLoader
@@ -23,10 +22,6 @@ args = parser.parse_args()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 os.makedirs(args.save_dir, exist_ok=True)
 
-patience = 10
-stable_epochs = 0
-best_epoch = 0
-
 ### Cargar dataset ###
 data = np.load(args.data).astype(np.float32)
 
@@ -34,15 +29,6 @@ data = np.load(args.data).astype(np.float32)
 dataset = TensorDataset(torch.from_numpy(data))
 loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
 print(f"Dataset cargado: {len(dataset)} señales de longitud {args.L}")
-
-### Definición de los modelos: Generator y Discriminator ###
-def gen_block(in_f, out_f):
-    # Cada bloque del Generado: Linear + BatchNorm + ReLU
-    return [nn.Linear(in_f, out_f), nn.BatchNorm1d(out_f), nn.ReLU(True)]
-
-def dis_block(in_f, out_f):
-    # Cada bloque del Discriminador: Linear + LeakyReLU + Dropout
-    return [nn.Linear(in_f, out_f), nn.LeakyReLU(0.2, True), nn.Dropout(0.2)]
 
 # ----- GENERATOR Conv1D ----- #
 class Generator(nn.Module):
@@ -184,58 +170,8 @@ for epoch in range(1, args.epochs + 1):
              'G_loss': g_loss_avg, 'D_loss': d_loss_avg},
             os.path.join(args.save_dir, 'model_best.pth')
         )
-        print(f"Nuevo mejor modelo guardao en la época {epoch} | G_loss={g_loss_avg:.4f}")
+        print(f"Nuevo mejor modelo guardado en la época {epoch} | G_loss={g_loss_avg:.4f}")
 
-checkpoint = torch.load(os.path.join(args.save_dir, 'model_best.pth'), map_location=device)
-G.load_state_dict(checkpoint['G'])
-D.load_state_dict(checkpoint['D'])
-G.eval()
-print(f"Mejor modelo cargado de la época {checkpoint['epoch']} | G_loss={checkpoint['G_loss']:.4f}")
-
-with torch.no_grad():
-    samples = G(fixed_z).cpu().numpy()
-
-np.save(os.path.join(args.save_dir, 'fixed_samples_best.npy'), samples)
 print("Entrenamiento completado. Modelos guardados en", args.save_dir)
-
-# Visualizar algunas señales generadas
-plt.figure(figsize=(10, 6))
-for i in range(8):
-    plt.subplot(4, 2, i+1)
-    plt.plot(samples[i], '--', color='orange', alpha=0.8, label='Generada')
-    plt.title(f'Señal generada {i+1} (mejor modelo)')
-    plt.xticks([]); plt.yticks([])
-plt.tight_layout()
-plt.show()
-
-print("\nVisualizando lo aprendido por el modelo final...")
-
-# # Generar nuevas señales
-# z_vis = torch.randn(8, args.z_dim, device=device)
-# with torch.no_grad():
-#     generated = G(z_vis).cpu().numpy()
-#
-# # Seleccionar señales reales para comparar
-# num_examples = 8
-# real_examples = data[:num_examples]
-#
-# # Comparar gráficamente modelo final
-# plt.figure(figsize=(12, 8))
-# for i in range(num_examples):
-#     plt.subplot(4, 2, i + 1)
-#     plt.plot(real_examples[i], color='blue', alpha=0.7, label='Real')
-#     plt.plot(generated[i], color='orange', linestyle='--', alpha=0.8, label='Generada')
-#     plt.title(f"Comparación señal {i + 1}")
-#     plt.xticks([]); plt.yticks([])
-# plt.tight_layout()
-# plt.legend(loc='upper right', fontsize=8)
-# plt.suptitle("Comparación de señales reales vs generadas (modelo final)", fontsize=14, y=1.02)
-#
-# plt.savefig(os.path.join(args.save_dir, 'comparacion_real_vs_generada.png'))
-# plt.show()
-
-# modelo mejor guardado
-checkpoint = torch.load(os.path.join(args.save_dir, 'model_best.pth'), map_location='cpu')
-print(f"Modelo guardado en la época: {checkpoint['epoch']}")
-print(f"Pérdida del generador (G_loss): {checkpoint['G_loss']:.4f}")
-print(f"Pérdida del discriminador (D_loss): {checkpoint['D_loss']:.4f}")
+print(f"Mejor G_loss: {best_g_loss:.4f}")
+print(f"Checkpoint guardado en: {args.save_dir}/model_best.pth")
