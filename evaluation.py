@@ -111,8 +111,7 @@ def evaluate_metrics(real, fake):
     return metrics
 
 def generate_signals(model_type, model_checkpoint, num_samples,
-                     device, z_dim=32, L=128,
-                     ddpm_steps=1000):
+                     device, z_dim=32, L=128, ddpm_steps=1000):
     """
     Genera señales sintéticas de canal utilizando un modelo ya entrenado,
     sin alterar los pesos ni la distribución aprendida.
@@ -131,7 +130,7 @@ def generate_signals(model_type, model_checkpoint, num_samples,
         # Muestreo directo: x = G(z)
         with torch.no_grad():
             z = torch.randn(num_samples, z_dim, device=device)
-            fake = G(z).cpu().numpy()
+            fake = G(z).squeeze(1).cpu().numpy()
     # DDPM: generación mediante proceso inverso de difusión
     elif model_type == 'ddpm':
         # cargar U-Net entrenada
@@ -249,4 +248,3 @@ if __name__ == "__main__":
     parser.add_argument("--ddpm_steps", type=int, default=1000)
     args = parser.parse_args()
     main(args)
-

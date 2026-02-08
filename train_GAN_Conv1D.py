@@ -1,37 +1,10 @@
 import argparse
 import os
-
 import numpy as np
 import torch
 from torch import nn
 from torch.nn.utils import spectral_norm
 from torch.utils.data import TensorDataset, DataLoader
-
-### Parámetros de ejecución ###
-parser = argparse.ArgumentParser()
-parser.add_argument('--data', type=str, default='data/dataset_nist.npy', help='Ruta del dataset .npy')
-parser.add_argument('--epochs', type=int, default=100, help='Número de épocas de entrenamiento')
-parser.add_argument('--batch_size', type=int, default=32, help='Tamaño del batch')
-parser.add_argument('--z_dim', type=int, default=32, help='Dimensión del vector de ruido del generador')
-parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
-parser.add_argument('--save_dir', type=str, default='checkpoints/GAN_Conv1D', help='Carpeta donde guardar checkpoints')
-parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
-parser.add_argument('--patience', type=int, default=10, help='Paciencia para early stopping')
-parser.add_argument('--min_delta', type=float, default=1e-4, help='Mejora mínima en G_loss')
-
-args = parser.parse_args()
-
-# dispositivo (GPU si está disponible)
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-os.makedirs(args.save_dir, exist_ok=True)
-
-### Cargar dataset ###
-data = np.load(args.data).astype(np.float32)
-
-# convertir a tensores de PyTorch y crear un DataLoader
-dataset = TensorDataset(torch.from_numpy(data))
-loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
-print(f"Dataset cargado: {len(dataset)} señales de longitud {args.L}")
 
 # ----- GENERATOR Conv1D ----- #
 class Generator(nn.Module):
@@ -91,93 +64,121 @@ def weights_init(m):
         if m.bias is not None:
             nn.init.zeros_(m.bias)
 
-# Crear instancias de ambos modelos
-G = Generator(args.z_dim, args.L).to(device)
-D = Discriminator(args.L).to(device)
-G.apply(weights_init)
-D.apply(weights_init)
+if __name__ == "__main__":
+    ### Parámetros de ejecución ###
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data', type=str, default='data/dataset_nist.npy', help='Ruta del dataset .npy')
+    parser.add_argument('--epochs', type=int, default=100, help='Número de épocas de entrenamiento')
+    parser.add_argument('--batch_size', type=int, default=32, help='Tamaño del batch')
+    parser.add_argument('--z_dim', type=int, default=32, help='Dimensión del vector de ruido del generador')
+    parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
+    parser.add_argument('--save_dir', type=str, default='checkpoints/GAN_Conv1D',
+                        help='Carpeta donde guardar checkpoints')
+    parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
+    parser.add_argument('--patience', type=int, default=10, help='Paciencia para early stopping')
+    parser.add_argument('--min_delta', type=float, default=1e-4, help='Mejora mínima en G_loss')
 
-### Definir pérdidas y optimizadores de G y D (LSGAN) ###
-# pérdida LSGAN
-criterion = nn.MSELoss()
-# optimizadores Adam para G y D
-optD = torch.optim.Adam(D.parameters(), lr=args.lr, betas=(0.5, 0.999))
-optG = torch.optim.Adam(G.parameters(), lr=args.lr, betas=(0.5, 0.999))
+    args = parser.parse_args()
 
-### Bucle del ENTRENAMIENTO principal ###
-# en cada iter:
-#   - entrenar primero discriminador (D)
-#   - luego el generador (G)
-#   - guardar las pérdidas promedio por época
-best_g_loss = float('inf')
-epochs_no_improve = 0
-for epoch in range(1, args.epochs + 1):
-    g_loss_avg = 0.0
-    d_loss_avg = 0.0
+    # dispositivo (GPU si está disponible)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    os.makedirs(args.save_dir, exist_ok=True)
 
-    for(real_batch,) in loader:
-        real = real_batch.to(device)
-        bsize = real.size(0)
+    ### Cargar dataset ###
+    data = np.load(args.data).astype(np.float32)
 
-        ### Entrenar Discriminador ###
-        optD.zero_grad()
-        # ruido leve en señales reales (ruido de medición)
-        real_noisy = real + 0.02 * torch.randn_like(real)
-        # etiquetas suavizadas
-        real_labels = torch.full((bsize, 1), 0.9, device=device)
-        fake_labels = torch.full((bsize, 1), 0.1, device=device)
-        # 1. Señales reales
-        pred_real = D(real_noisy)
-        loss_real = criterion(pred_real, real_labels)
-        # 2. Señales falsas generadas
-        z = torch.randn(bsize, args.z_dim, device=device)
-        fake = G(z).detach()
-        pred_fake = D(fake)
-        loss_fake = criterion(pred_fake, fake_labels)
-        # 3. Pérdida total del discriminador (real=1, fake=0)
-        lossD = 0.5 * (loss_real + loss_fake)
-        lossD.backward()
-        optD.step()
+    # convertir a tensores de PyTorch y crear un DataLoader
+    dataset = TensorDataset(torch.from_numpy(data))
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
+    print(f"Dataset cargado: {len(dataset)} señales de longitud {args.L}")
 
-        ### Entrenar Generador ###
-        for _ in range(2):
-            optG.zero_grad()
+    # Crear instancias de ambos modelos
+    G = Generator(args.z_dim, args.L).to(device)
+    D = Discriminator(args.L).to(device)
+    G.apply(weights_init)
+    D.apply(weights_init)
+
+    ### Definir pérdidas y optimizadores de G y D (LSGAN) ###
+    # pérdida LSGAN
+    criterion = nn.MSELoss()
+    # optimizadores Adam para G y D
+    optD = torch.optim.Adam(D.parameters(), lr=args.lr, betas=(0.5, 0.999))
+    optG = torch.optim.Adam(G.parameters(), lr=args.lr, betas=(0.5, 0.999))
+
+    ### Bucle del ENTRENAMIENTO principal ###
+    # en cada iter:
+    #   - entrenar primero discriminador (D)
+    #   - luego el generador (G)
+    #   - guardar las pérdidas promedio por época
+    best_g_loss = float('inf')
+    epochs_no_improve = 0
+    for epoch in range(1, args.epochs + 1):
+        g_loss_avg = 0.0
+        d_loss_avg = 0.0
+
+        for(real_batch,) in loader:
+            real = real_batch.to(device)
+            bsize = real.size(0)
+
+            ### Entrenar Discriminador ###
+            optD.zero_grad()
+            # ruido leve en señales reales (ruido de medición)
+            real_noisy = real + 0.02 * torch.randn_like(real)
+            # etiquetas suavizadas
+            real_labels = torch.full((bsize, 1), 0.9, device=device)
+            fake_labels = torch.full((bsize, 1), 0.1, device=device)
+            # 1. Señales reales
+            pred_real = D(real_noisy)
+            loss_real = criterion(pred_real, real_labels)
+            # 2. Señales falsas generadas
             z = torch.randn(bsize, args.z_dim, device=device)
-            fake = G(z)
+            fake = G(z).detach()
             pred_fake = D(fake)
-            lossG = criterion(pred_fake, real_labels)
-            lossG.backward()
-            optG.step()
+            loss_fake = criterion(pred_fake, fake_labels)
+            # 3. Pérdida total del discriminador (real=1, fake=0)
+            lossD = 0.5 * (loss_real + loss_fake)
+            lossD.backward()
+            optD.step()
 
-        # acumular pérdidas
-        g_loss_avg += lossG.item()
-        d_loss_avg += lossD.item()
+            ### Entrenar Generador ###
+            for _ in range(2):
+                optG.zero_grad()
+                z = torch.randn(bsize, args.z_dim, device=device)
+                fake = G(z)
+                pred_fake = D(fake)
+                lossG = criterion(pred_fake, real_labels)
+                lossG.backward()
+                optG.step()
 
-    # promedios por época
-    g_loss_avg /= len(loader)
-    d_loss_avg /= len(loader)
+            # acumular pérdidas
+            g_loss_avg += lossG.item()
+            d_loss_avg += lossD.item()
 
-    # mostrar cada 20 épocas
-    if epoch % 20 == 0 or epoch == 1:
-        print(f"Epoch {epoch}/{args.epochs} | G_loss={g_loss_avg:.4f} | D_loss={d_loss_avg:.4f}")
+        # promedios por época
+        g_loss_avg /= len(loader)
+        d_loss_avg /= len(loader)
 
-    # Guardar mejor modelo (según menor G_loss)
-    if g_loss_avg < best_g_loss - args.min_delta:
-        best_g_loss = g_loss_avg
-        epochs_no_improve = 0
-        torch.save(
-            {'G': G.state_dict(), 'D': D.state_dict(), 'epoch': epoch,
-             'G_loss': g_loss_avg, 'D_loss': d_loss_avg},
-            os.path.join(args.save_dir, 'model_best.pth')
-        )
-        print(f"Nuevo mejor modelo en la época {epoch} | G_loss={g_loss_avg:.4f}")
-    else:
-        epochs_no_improve += 1
+        # mostrar cada 20 épocas
+        if epoch % 20 == 0 or epoch == 1:
+            print(f"Epoch {epoch}/{args.epochs} | G_loss={g_loss_avg:.4f} | D_loss={d_loss_avg:.4f}")
 
-    if epochs_no_improve >= args.patience:
-        print(f"Early stopping at epoch {epoch} (sin mejora en {args.patience} épocas)")
-        break
+        # Guardar mejor modelo (según menor G_loss)
+        if g_loss_avg < best_g_loss - args.min_delta:
+            best_g_loss = g_loss_avg
+            epochs_no_improve = 0
+            torch.save(
+                {'G': G.state_dict(), 'D': D.state_dict(), 'epoch': epoch,
+                 'G_loss': g_loss_avg, 'D_loss': d_loss_avg},
+                os.path.join(args.save_dir, 'model_best.pth')
+            )
+            print(f"Nuevo mejor modelo en la época {epoch} | G_loss={g_loss_avg:.4f}")
+        else:
+            epochs_no_improve += 1
 
-print("Entrenamiento completado. Modelos guardados en", args.save_dir)
-print(f"Mejor G_loss: {best_g_loss:.4f}")
-print(f"Checkpoint guardado en: {args.save_dir}/model_best.pth")
+        if epochs_no_improve >= args.patience:
+            print(f"Early stopping at epoch {epoch} (sin mejora en {args.patience} épocas)")
+            break
+
+    print("Entrenamiento completado. Modelos guardados en", args.save_dir)
+    print(f"Mejor G_loss: {best_g_loss:.4f}")
+    print(f"Checkpoint guardado en: {args.save_dir}/model_best.pth")
