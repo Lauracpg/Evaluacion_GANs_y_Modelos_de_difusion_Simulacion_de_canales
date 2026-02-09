@@ -190,6 +190,7 @@ def train():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=2e-4)
     parser.add_argument('--save_dir', type=str, default='checkpoints/ddpm')
+    parser.add_argument('--patience', type=int, default=10)
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -206,8 +207,11 @@ def train():
 
     model = UNet1D().to(device)
     ddpm = DDPM(model).to(device)
-
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    best_loss = float('inf')
+    epochs_no_improve = 0
+    min_delta = 1e-4
 
     for epoch in range(1, args.epochs + 1):
         loss_avg = 0.0
@@ -223,8 +227,21 @@ def train():
             loss_avg += loss.item()
 
         loss_avg /= len(loader)
-
         print(f"Epoch {epoch} | Loss {loss_avg:.6f}")
+
+        if loss_avg < best_loss - min_delta:
+            best_loss = loss_avg
+            epochs_no_improve = 0
+            torch.save(model.state_dict(),
+                       os.path.join(args.save_dir, "best_model.pth"))
+            print(f"Mejor modelo guardado (loss={best_loss:.6f})")
+        else:
+            epochs_no_improve += 1
+            print(f"Sin mejora durante {epochs_no_improve} epochs")
+
+        if epochs_no_improve >= args.patience:
+            print(f"Early stopping: no ha habido mejora en {args.patience} epochs")
+            break
 
         if epoch % 20 == 0:
             torch.save(model.state_dict(),
