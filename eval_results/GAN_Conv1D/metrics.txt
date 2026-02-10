@@ -1,0 +1,13 @@
+Model type: dcgan
+Checkpoint: checkpoints/GAN_Conv1D/model_best.pth
+Num eval samples: 500
+----------------------------------------
+pdp_mae: 0.069666
+avg_delay_mae: 12.952011
+rms_mae: 9.748111
+energy_mae: 6.020624
+std_mae: 0.058383
+autocorr_mae: 0.094429
+psd_mae: 0.028165
+diversity_fake: 3.317564
+diversity_real: 0.912805

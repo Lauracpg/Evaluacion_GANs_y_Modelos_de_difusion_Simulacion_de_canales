@@ -142,27 +142,32 @@ def generate_signals(model_type, model_checkpoint, num_samples,
         ddpm = DDPM(unet, T=ddpm_steps).to(device)
         ddpm.model.eval()
 
-        fake = []
-
         with torch.no_grad():
-            for _ in range(num_samples):
-                # Inicialización desde ruido gaussiano puro
-                x = torch.randn(1, 1, L, device=device)
+            # Inicialización desde ruido gaussiano puro
+            x = torch.randn(num_samples, 1, L, device=device)
 
-                # Proceso inverso de difusión: eliminar ruido paso a paso
-                # desde t=T-1 hasta t=0
-                for t in reversed(range(ddpm.T)):
-                    noise_pred = ddpm.model(x,torch.tensor([t], device=device))
-                    beta = ddpm.betas[t]
-                    # ecuación de muestreo DDPM (simplificada)
-                    x = (1 / torch.sqrt(1-beta) * (
-                        x - beta / torch.sqrt(1 - ddpm.alphas_cumprod[t]) * noise_pred)
-                    )
-                # guardar señal final x_0
-                x0 = x.squeeze()
-                x0= torch.clamp(x0, -1, 1) # [-1,1]
-                fake.append(x0.cpu().numpy())
-        fake = np.array(fake)
+            # Proceso inverso de difusión: eliminar ruido paso a paso
+            # desde t=T-1 hasta t=0
+            for t in reversed(range(ddpm.T)):
+                t_batch = torch.full((num_samples,), t, device=device, dtype=torch.long)
+                noise_pred = ddpm.model(x, t_batch)
+                beta = ddpm.betas[t]
+
+                if t > 0:
+                    z = torch.randn_like(x)
+                else:
+                    z = torch.zeros_like(x)
+
+                # ecuación de muestreo DDPM (simplificada)
+                x = (
+                    (1 / torch.sqrt(1-beta)) *
+                    (x - beta / torch.sqrt(1 - ddpm.alphas_cumprod[t]) * noise_pred)
+                    + torch.sqrt(beta) * z
+                )
+            # guardar señal final x_0
+            x0 = x.squeeze(1)
+            x0= torch.clamp(x0, -1, 1) # [-1,1]
+            fake = x0.cpu().numpy()
     else:
         raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
 
@@ -194,6 +199,27 @@ def main(args):
     # Guardar resultados
     os.makedirs(args.save_dir, exist_ok=True)
     np.save(os.path.join(args.save_dir, 'metrics.npy'), metrics)
+
+    scalar_keys = [
+        'pdp_mae',
+        'avg_delay_mae',
+        'rms_mae',
+        'energy_mae',
+        'std_mae',
+        'autocorr_mae',
+        'psd_mae',
+        'diversity_fake',
+        'diversity_real'
+    ]
+
+    txt_path = os.path.join(args.save_dir, "metrics.txt")
+    with open(txt_path, "w") as f:
+        f.write(f"Model type: {args.model_type}\n")
+        f.write(f"Checkpoint: {args.model}\n")
+        f.write(f"Num eval samples: {args.num_eval}\n")
+        f.write("-" * 40 + "\n")
+        for k in scalar_keys:
+            f.write(f"{k}: {metrics[k]:.6f}\n")
 
     # Gráfico PDP
     plt.figure(figsize=(8, 4))
@@ -247,4 +273,15 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--ddpm_steps", type=int, default=1000)
     args = parser.parse_args()
+
+    base_save_dir = "eval_results"
+    if args.model_type == "dcgan":
+        args.save_dir = os.path.join(base_save_dir, "GAN_Conv1D")
+    elif args.model_type == "ddpm":
+        args.save_dir = os.path.join(base_save_dir, "ddpm_Conv1D")
+    else:
+        raise ValueError("model_type inválido")
+
+    os.makedirs(args.save_dir, exist_ok=True)
+
     main(args)
