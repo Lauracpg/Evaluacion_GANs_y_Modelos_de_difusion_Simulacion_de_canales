@@ -196,6 +196,20 @@ def main(args):
         print(f"{key}: {metrics[key]:.6f}")
     print(f"Diversidad fake: {metrics['diversity_fake']:.6f}")
 
+    print("\n--- MÉTRICAS REALES ---")
+    print(f"Avg delay real: {metrics['avg_real']:.6f}")
+    print(f"RMS delay real: {metrics['rms_real']:.6f}")
+    print(f"Energy mean real: {np.mean(metrics['energy_real']):.6f}")
+    print(f"Energy std real: {metrics['diversity_real']:.6f}")
+    print(f"Mean PSD real: {np.mean(metrics['psd_real']):.6f}")
+
+    print("\n--- MÉTRICAS GENERADAS ---")
+    print(f"Avg delay fake: {metrics['avg_fake']:.6f}")
+    print(f"RMS delay fake: {metrics['rms_fake']:.6f}")
+    print(f"Energy mean fake: {np.mean(metrics['energy_fake']):.6f}")
+    print(f"Energy std fake: {metrics['diversity_fake']:.6f}")
+    print(f"Mean PSD fake: {np.mean(metrics['psd_fake']):.6f}")
+
     # Guardar resultados
     os.makedirs(args.save_dir, exist_ok=True)
     np.save(os.path.join(args.save_dir, 'metrics.npy'), metrics)
@@ -276,7 +290,7 @@ if __name__ == "__main__":
 
     base_save_dir = "eval_results"
     if args.model_type == "dcgan":
-        args.save_dir = os.path.join(base_save_dir, "GAN_Conv1D")
+        args.save_dir = os.path.join(base_save_dir, "DCGAN_Conv1D")
     elif args.model_type == "ddpm":
         args.save_dir = os.path.join(base_save_dir, "ddpm_Conv1D")
     else:

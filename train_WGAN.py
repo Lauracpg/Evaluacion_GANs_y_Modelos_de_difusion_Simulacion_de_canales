@@ -13,24 +13,23 @@ class Generator(nn.Module):
         self.init_len = L // 8
         self.fc = nn.Linear(z_dim, 128 * self.init_len)
         self.net = nn.Sequential(
-            nn.BatchNorm1d(128),
             nn.ReLU(True),
 
             nn.ConvTranspose1d(128, 64, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm1d(64),
             nn.ReLU(True),
 
             nn.ConvTranspose1d(64, 32, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm1d(32),
             nn.ReLU(True),
 
             nn.ConvTranspose1d(32, 1, kernel_size=4, stride=2, padding=1),
             nn.Tanh()
         )
+
     def forward(self, z):
         x = self.fc(z)
         x = x.view(z.size(0), 128, self.init_len)
         return self.net(x)
+
 
 # ----- DISCRIMINATOR Conv1D ----- #
 class Discriminator(nn.Module):
@@ -41,11 +40,9 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2),
 
             spectral_norm(nn.Conv1d(32, 64, 4, 2, 1)),
-            #nn.BatchNorm1d(64),
             nn.LeakyReLU(0.2),
 
             spectral_norm(nn.Conv1d(64, 128, 4, 2, 1)),
-            #nn.BatchNorm1d(128),
             nn.LeakyReLU(0.2),
         )
         self.fc = spectral_norm(nn.Linear(128 * (L // 8), 1))
@@ -62,12 +59,37 @@ def weights_init(m):
         if m.bias is not None:
             nn.init.zeros_(m.bias)
 
+def gradient_penalty(D, real, fake, device):
+    bsize = real.size(0)
+    epsilon = torch.rand(bsize, 1, 1, device=device)
+    epsilon = epsilon.expand_as(real)
+
+    interpolated = epsilon * real + (1 - epsilon) * fake
+    interpolated.requires_grad_(True)
+
+    d_interpolated = D(interpolated)
+
+    gradients = torch.autograd.grad(
+        outputs=d_interpolated,
+        inputs=interpolated,
+        grad_outputs=torch.ones_like(d_interpolated),
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True
+    )[0]
+    gradients = gradients.view(bsize, -1)
+    gp = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+    return gp
+
+def compute_pdp(x):
+    return torch.mean(x ** 2, dim=0)
+
 def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
-              save_dir='checkpoints/DCGAN_Conv1D',patience=10,
+              save_dir='checkpoints/GAN_Conv1D',patience=10,
               min_delta=1e-4, z_dim=32):
     os.makedirs(save_dir, exist_ok=True)
     # pérdida LSGAN
-    criterion = nn.MSELoss()
+    #criterion = nn.MSELoss()
     # optimizadores Adam para G y D
     optD = torch.optim.Adam(D.parameters(), lr=lr, betas=(0.5, 0.999))
     optG = torch.optim.Adam(G.parameters(), lr=lr, betas=(0.5, 0.999))
@@ -78,6 +100,10 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
     #   - luego el generador (G)
     #   - guardar las pérdidas promedio por época
 
+    λ_gp = 10
+    λ_pdp = 0.1
+    n_critic = 5
+
     best_g_loss = float('inf')
     epochs_no_improve = 0
 
@@ -86,42 +112,46 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
         d_loss_avg = 0.0
 
         for (real_batch,) in loader:
-            real = real_batch.to(device).unsqueeze(1)
+            real = real_batch.to(device)
+            real = real.unsqueeze(1)
             bsize = real.size(0)
 
-            ### Entrenar Discriminador ###
-            optD.zero_grad()
-            # ruido leve en señales reales (ruido de medición)
-            real_noisy = real + 0.02 * torch.randn_like(real)
-            # etiquetas suavizadas
-            real_labels = torch.full((bsize, 1), 0.9, device=device)
-            fake_labels = torch.full((bsize, 1), 0.1, device=device)
-            # 1. Señales reales
-            pred_real = D(real_noisy)
-            loss_real = criterion(pred_real, real_labels)
-            # 2. Señales falsas generadas
-            z = torch.randn(bsize, z_dim, device=device)
-            fake = G(z).detach()
+            d_loss_batch = 0.0
 
-            pred_fake = D(fake)
-            loss_fake = criterion(pred_fake, fake_labels)
-            # 3. Pérdida total del discriminador (real=1, fake=0)
-            lossD = 0.5 * (loss_real + loss_fake)
-            lossD.backward()
-            optD.step()
+            ### Entrenar Discriminador ###
+            for _ in range(n_critic):
+                optD.zero_grad()
+                z = torch.randn(bsize, z_dim, device=device)
+                fake = G(z).detach()
+
+                loss_D = -(D(real).mean() - D(fake).mean())
+                gp = gradient_penalty(D, real, fake, device)
+
+                loss_D_total = loss_D + λ_gp * gp
+                loss_D_total.backward()
+                optD.step()
+
+                d_loss_batch += loss_D.item()
 
             ### Entrenar Generador ###
             optG.zero_grad()
+
             z = torch.randn(bsize, z_dim, device=device)
             fake = G(z)
-            pred_fake = D(fake)
-            lossG = criterion(pred_fake, real_labels)
-            lossG.backward()
+
+            loss_adv = -D(fake).mean()
+
+            pdp_real = compute_pdp(real).detach()
+            pdp_fake = compute_pdp(fake)
+            loss_pdp = torch.mean(torch.abs(pdp_real - pdp_fake))
+
+            loss_G_total = loss_adv + λ_pdp * loss_pdp
+            loss_G_total.backward()
             optG.step()
 
             # acumular pérdidas
-            g_loss_avg += lossG.item()
-            d_loss_avg += lossD.item()
+            g_loss_avg += loss_G_total.item()
+            d_loss_avg += d_loss_batch / n_critic
 
         # promedios por época
         g_loss_avg /= len(loader)
@@ -164,7 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=32, help='Tamaño del batch')
     parser.add_argument('--z_dim', type=int, default=32, help='Dimensión del vector de ruido del generador')
     parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
-    parser.add_argument('--save_dir', type=str, default='checkpoints/DCGAN_Conv1D',
+    parser.add_argument('--save_dir', type=str, default='checkpoints/WGAN_Conv1D',
                         help='Carpeta donde guardar checkpoints')
     parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
     parser.add_argument('--patience', type=int, default=10, help='Paciencia para early stopping')
