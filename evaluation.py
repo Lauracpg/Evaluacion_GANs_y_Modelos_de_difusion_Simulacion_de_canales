@@ -4,9 +4,11 @@ import torch
 import os
 import matplotlib.pyplot as plt
 from scipy.signal import welch
+from scipy.stats import ks_2samp
 
 from train_Diffusion_Model import UNet1D, DDPM
-from train_GAN_Conv1D import Generator
+#from train_GAN_Conv1D import Generator
+from train_DCGAN_Conv1D import Generator
 
 def compute_energy(signals):
     """Energía total de cada señal"""
@@ -38,17 +40,37 @@ def compute_pdp(signals):
     return np.mean(power, axis=0)
 
 def compute_average_delay(signals):
+    """
+    Average delay por señal y luego promedio global.
+    """
     N, L = signals.shape
     delays = np.arange(L)
-    power = np.abs(signals) ** 2
-    num = np.sum(delays * power)
-    den = np.sum(power) + 1e-12
-    return num / den
+    avg_delays = []
+    for s in signals:
+        power = np.abs(s) ** 2
+        total_power = np.sum(power) + 1e-12
+        mean_delay = np.sum(delays * power) / total_power
+        avg_delays.append(mean_delay)
+
+    avg_delays = np.array(avg_delays)
+    return np.mean(avg_delays), avg_delays
 
 def compute_rms_delay_spread(signals):
+    """
+    RMS delay spread por señal y luego promedio global.
+    """
     N, L = signals.shape
     delays = np.arange(L)
-    power = np.abs(signals) ** 2
+    rms_values = []
+    for s in signals:
+        power = np.abs(s) ** 2
+        total_power = np.sum(power) + 1e-12
+        mean_delay = np.sum(delays * power) / total_power
+        rms = np.sqrt(np.sum(power * (delays - mean_delay) ** 2) / total_power)
+        rms_values.append(rms)
+    rms_values = np.array(rms_values)
+    return np.mean(rms_values), rms_values
+
     avg_delay = compute_average_delay(signals)
     num = np.sum(power * (delays - avg_delay) ** 2)
     den = np.sum(power) + 1e-12
@@ -74,20 +96,21 @@ def evaluate_metrics(real, fake):
     metrics['pdp_real'] = compute_pdp(real)
     metrics['pdp_fake'] = compute_pdp(fake)
     metrics['pdp_mae'] = mae(metrics['pdp_real'], metrics['pdp_fake'])
-
-    metrics['avg_real'] = compute_average_delay(real)
-    metrics['avg_fake'] = compute_average_delay(fake)
+    # Average delay por señal
+    metrics['avg_real'], metrics['avg_real_all'] = compute_average_delay(real)
+    metrics['avg_fake'], metrics['avg_fake_all'] = compute_average_delay(fake)
     metrics['avg_delay_mae'] = abs(metrics['avg_real'] - metrics['avg_fake'])
-
-    metrics['rms_real'] = compute_rms_delay_spread(real)
-    metrics['rms_fake'] = compute_rms_delay_spread(fake)
+    # RMS delay spread por señal
+    metrics['rms_real'], metrics['rms_real_all'] = compute_rms_delay_spread(real)
+    metrics['rms_fake'], metrics['rms_fake_all'] = compute_rms_delay_spread(fake)
     metrics['rms_mae'] = abs(metrics['rms_real'] - metrics['rms_fake'])
+    # KS-test para distribución RMS
+    ks_stat, p_value = ks_2samp(metrics['rms_real_all'],
+                                metrics['rms_fake_all'])
+    metrics['rms_ks_stat'] = ks_stat
+    metrics['rms_ks_pvalue'] = p_value
 
     # Métricas adicionales
-    metrics['energy_real'] = compute_energy(real)
-    metrics['energy_fake'] = compute_energy(fake)
-    metrics['energy_mae'] = mae(metrics['energy_real'], metrics['energy_fake'])
-
     metrics['std_real'] = compute_std_per_tap(real)
     metrics['std_fake'] = compute_std_per_tap(fake)
     metrics['std_mae'] = mae(metrics['std_real'], metrics['std_fake'])
@@ -105,9 +128,6 @@ def evaluate_metrics(real, fake):
     metrics['psd_fake'], _ = compute_psd(fake)
     metrics['psd_mae'] = mae(metrics['psd_real'], metrics['psd_fake'])
 
-    # Diversidad: std de energía por muestra
-    metrics['diversity_fake'] = np.std(metrics['energy_fake'])
-    metrics['diversity_real'] = np.std(metrics['energy_real'])
     return metrics
 
 def generate_signals(model_type, model_checkpoint, num_samples,
@@ -187,27 +207,29 @@ def main(args):
     )
     print("Señales generadas:", fake_eval.shape)
 
+    real_eval_complex = real_eval[:,0,:] + 1j * real_eval[:,1,:]
+    fake_eval_complex = fake_eval[:,0,:] + 1j * fake_eval[:,1,:]
+    real_mag = np.abs(real_eval_complex)
+    fake_mag = np.abs(fake_eval_complex)
+
     # calcular métricas
-    metrics = evaluate_metrics(real_eval, fake_eval)
+    metrics = evaluate_metrics(real_mag, fake_mag)
 
     print("\n--- RESULTADOS ---")
-    for key in ['pdp_mae', 'avg_delay_mae', 'rms_mae','energy_mae',
+    for key in ['pdp_mae', 'avg_delay_mae', 'rms_mae',
                 'std_mae', 'autocorr_mae', 'psd_mae']:
         print(f"{key}: {metrics[key]:.6f}")
-    print(f"Diversidad fake: {metrics['diversity_fake']:.6f}")
+    print(f"RMS KS statistic: {metrics['rms_ks_stat']:.6f}")
+    print(f"RMS KS p_value: {metrics['rms_ks_pvalue']:.6f}")
 
     print("\n--- MÉTRICAS REALES ---")
     print(f"Avg delay real: {metrics['avg_real']:.6f}")
     print(f"RMS delay real: {metrics['rms_real']:.6f}")
-    print(f"Energy mean real: {np.mean(metrics['energy_real']):.6f}")
-    print(f"Energy std real: {metrics['diversity_real']:.6f}")
     print(f"Mean PSD real: {np.mean(metrics['psd_real']):.6f}")
 
     print("\n--- MÉTRICAS GENERADAS ---")
     print(f"Avg delay fake: {metrics['avg_fake']:.6f}")
     print(f"RMS delay fake: {metrics['rms_fake']:.6f}")
-    print(f"Energy mean fake: {np.mean(metrics['energy_fake']):.6f}")
-    print(f"Energy std fake: {metrics['diversity_fake']:.6f}")
     print(f"Mean PSD fake: {np.mean(metrics['psd_fake']):.6f}")
 
     # Guardar resultados
@@ -218,12 +240,9 @@ def main(args):
         'pdp_mae',
         'avg_delay_mae',
         'rms_mae',
-        'energy_mae',
         'std_mae',
         'autocorr_mae',
         'psd_mae',
-        'diversity_fake',
-        'diversity_real'
     ]
 
     txt_path = os.path.join(args.save_dir, "metrics.txt")
@@ -267,8 +286,8 @@ def main(args):
     plt.figure(figsize=(12, 6))
     for i in range(num_plot):
         plt.subplot(4,2,i+1)
-        plt.plot(real_eval[i], label='Real')
-        plt.plot(fake_eval[i], '--',label='Generado')
+        plt.plot(real_mag[i], label='Real')
+        plt.plot(fake_mag[i], '--',label='Generado')
         plt.xticks([]); plt.yticks([])
     plt.suptitle(f"Comparación señales reales vs {args.model_type.upper()}")
     plt.legend(loc='upper right', fontsize=8)
@@ -281,7 +300,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--model_type", type=str, choices=['dcgan', 'ddpm'], default='dcgan')
     parser.add_argument("--save_dir", type=str, default="eval_results")
-    parser.add_argument("--z_dim", type=int, default=32)
+    parser.add_argument("--z_dim", type=int, default=128)
     parser.add_argument("--L", type=int, default=128)
     parser.add_argument("--num_eval", type=int, default=500)
     parser.add_argument("--device", type=str, default="cpu")
