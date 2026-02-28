@@ -11,13 +11,17 @@ class Generator(nn.Module):
         super().__init__()
         self.init_len = L // 8
         self.fc = nn.Linear(z_dim, 128 * self.init_len)
+        self.bn0 = nn.BatchNorm1d(128)
+
         self.net = nn.Sequential(
             nn.ReLU(True),
 
             nn.ConvTranspose1d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(64),
             nn.ReLU(True),
 
             nn.ConvTranspose1d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(32),
             nn.ReLU(True),
 
             nn.ConvTranspose1d(32, 2, kernel_size=4, stride=2, padding=1),
@@ -27,6 +31,7 @@ class Generator(nn.Module):
     def forward(self, z):
         x = self.fc(z)
         x = x.view(z.size(0), 128, self.init_len)
+        x = self.bn0(x)
         return self.net(x)
 
 
@@ -176,14 +181,14 @@ if __name__ == "__main__":
     ### Parámetros de ejecución ###
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='data/dataset_nist.npy', help='Ruta del dataset .npy')
-    parser.add_argument('--epochs', type=int, default=200, help='Número de épocas de entrenamiento')
+    parser.add_argument('--epochs', type=int, default=150, help='Número de épocas de entrenamiento')
     parser.add_argument('--batch_size', type=int, default=64, help='Tamaño del batch')
     parser.add_argument('--z_dim', type=int, default=64, help='Dimensión del vector de ruido del generador')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate (tasa de aprendizaje)')
-    parser.add_argument('--n_critic', type=int, default=5,help='Número de updates del critic por update del generator')
-    parser.add_argument('--lambda_gp', type=float,default=10.0, help='Peso del gradient penalty')
-    parser.add_argument('--patience', type=int, default=20,help='Paciencia para early stopping')
-    parser.add_argument('--min_delta', type=float,default=1e-4,help='Mejora mínima en Wasserstein distance')
+    parser.add_argument('--n_critic', type=int, default=7,help='Número de updates del critic por update del generator')
+    parser.add_argument('--lambda_gp', type=float,default=5.0, help='Peso del gradient penalty')
+    parser.add_argument('--patience', type=int, default=40,help='Paciencia para early stopping')
+    parser.add_argument('--min_delta', type=float,default=1e-3,help='Mejora mínima en Wasserstein distance')
     parser.add_argument('--save_dir', type=str, default='checkpoints/WGAN_GP_Conv1D', help='Carpeta donde guardar checkpoints')
     parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
 

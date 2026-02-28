@@ -14,6 +14,7 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
 
     # extraer todas las matrices que empiezan por "h_"
     channel_keys = [k for k in keys if k.startswith("h_")]
+
     print("\nMatrices de canal encontradas:")
     for ck in channel_keys:
         print(" ", ck)
@@ -23,15 +24,13 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
 
     # Procesar cada matriz h_XXXX
     for ck in channel_keys:
-        print("\n" + "="*60)
         print(f"\nProcesando {ck} ...")
-        print("="*60)
 
         H_raw = f[ck] # matriz 241 x YYY
         # conservar el dtype estructurado
         H_struct = H_raw[...]
 
-        print("dtype de la matriz H:", H_struct.dtype)
+        print("dtype:", H_struct.dtype)
 
         # reconstruir números complejos
         H_real = np.nan_to_num(H_struct["real"], nan=0.0)
@@ -44,7 +43,6 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
         if H.shape[0] != 241 and H.shape[1] == 241:
             print("La matriz está transpuesta. Corrigiendo orientación...")
             H = H.T
-            print("Transpuesta:", H.shape)
 
         # H es 241 x YYY, YYY = número de canales
         print("Shape actual (debería ser 241 x N):", H.shape)
@@ -52,26 +50,39 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
         # recortar a 128 muestras
         H_crop = H[:L, :] # shape: L x num_canales
         print("Shape tras recorte a L=128:", H_crop.shape)
-
         # convertir columnas -> filas
         H_crop = H_crop.T
         print(" Shape (canales x L):", H_crop.shape)
 
         num_c = H_crop.shape[0]
         total_channels += num_c
-        print(f"Añadiendo {num_c} canales de tamaño {L}")
 
-        # convertir a magnitud
-        H_mag = np.abs(H_crop)
+        # # convertir a magnitud
+        # H_mag = np.abs(H_crop)
+        #
+        # # normalizar cada canal a [-1,1]
+        # max_vals = np.max(H_mag, axis=1, keepdims=True)
+        # print("Primeros 5 valores max por canal:", max_vals[:5].flatten())
+        # H_mag = H_mag/(max_vals + 1e-12) # [0,1]
+        # H_mag = 2 * H_mag - 1 # [-1,1]
+        #
+        # print("Rango final: min =", H_mag.min(), " max =", H_mag.max())
+        # all_channels.append(H_mag.astype(np.float32))
 
-        # normalizar cada canal a [-1,1]
-        max_vals = np.max(H_mag, axis=1, keepdims=True)
-        print("Primeros 5 valores max por canal:", max_vals[:5].flatten())
-        H_mag = H_mag/(max_vals + 1e-12) # [0,1]
-        H_mag = 2 * H_mag - 1 # [-1,1]
+        # Separar real e imaginario (SIN normalizar todavía)
+        H_real = np.real(H_crop)
+        H_imag = np.imag(H_crop)
 
-        print("Rango final: min =", H_mag.min(), " max =", H_mag.max())
-        all_channels.append(H_mag.astype(np.float32))
+        # Normalización
+        energy = np.sqrt(np.sum(H_real**2 + H_imag**2, axis=1, keepdims=True))
+        H_real = H_real / (energy + 1e-12)
+        H_imag = H_imag / (energy + 1e-12)
+
+        H_2_channel = np.stack([H_real, H_imag], axis=1)
+        all_channels.append(H_2_channel.astype(np.float32))
+
+        print(f"Añadidos {num_c} canales")
+
     # juntar todos los canales
     dataset = np.vstack(all_channels)
 
@@ -81,6 +92,14 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
     print("Canales totales:", total_channels)
     print("Shape final:", dataset.shape)
     print("Min:", dataset.min(), " Max:", dataset.max())
+
+    # [-1, 1]
+    max_abs = np.max(np.abs(dataset))
+    dataset = dataset / (max_abs + 1e-12)
+
+    print("\nRango final:")
+    print("Min:", dataset.min())
+    print("Max", dataset.max())
 
     # guardar
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -93,96 +112,129 @@ def analyze_dataset(data, save_dir="data", num_examples=5, heatmap_channels=100)
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
-    N, L = data.shape
+    N, C, L = data.shape # C = 2
+    assert C==2, "El dataset debe tener 2 canales (real, imag)"
+
     print("\nDATASET ANALYSIS")
     print(f"Total de canales: {N}")
+    print(f"Canales por muestra: {C}")
     print(f"Longitud temporal: {L}")
-    print(f"Min: {data.min():.4f} | Max: {data.max():.4f}")
+    print(f"Min global: {data.min():.4f} | Max global: {data.max():.4f}")
+
+    real = data[:, 0, :]
+    imag = data[:, 1, :]
 
     # Ejemplos de canales reales:
     plt.figure(figsize=(10, 4))
-    for i in range(num_examples):
-        plt.plot(data[i], alpha=0.8)
-    plt.title("Ejemplos de canales reales (magnitud normalizada)")
+    for i in range(min(num_examples, N)):
+        plt.plot(real[i], alpha=0.7)
+    plt.title("Ejemplos - Parte REAL")
     plt.xlabel("Muestra temporal")
-    plt.ylabel("Amplitud normalizada")
+    plt.ylabel("Amplitud")
     plt.grid(alpha=0.3)
 
     if save_dir:
-        plt.savefig(os.path.join(save_dir, "examples_channels.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(os.path.join(save_dir, "examples_real.png"), dpi=300, bbox_inches="tight")
+    plt.show()
+
+    plt.figure(figsize=(10, 4))
+    for i in range(min(num_examples, N)):
+        plt.plot(imag[i], alpha=0.7)
+    plt.title("Ejemplos - Parte IMAGINARIA")
+    plt.xlabel("Muestra temporal")
+    plt.ylabel("Amplitud")
+    plt.grid(alpha=0.3)
+
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, "examples_imag.png"), dpi=300, bbox_inches="tight")
     plt.show()
 
     # Histograma global de amplitudes
     plt.figure(figsize=(6, 4))
-    plt.hist(data.flatten(), bins=100, density=True, alpha=0.8)
-    plt.title("Distribución global de amplitudes del canal")
-    plt.xlabel("Amplitud normalizada")
+    plt.hist(real.flatten(), bins=100, density=True, alpha=0.6, label="Real")
+    plt.hist(imag.flatten(), bins=100, density=True, alpha=0.6, label="Imag")
+    plt.title("Distribución global Real / Imag")
+    plt.xlabel("Valor normalizado")
     plt.ylabel("Densidad")
-    plt.grid(alpha=0.3)
-
-    if save_dir:
-        plt.savefig(os.path.join(save_dir, "histogram_amplitudes.png"), dpi=300, bbox_inches="tight")
-    plt.show()
-
-    # Perfil temporal medio del canal
-    mean_profile = data.mean(axis=0)
-    std_profile = data.std(axis=0)
-
-    plt.figure(figsize=(8, 4))
-    plt.plot(mean_profile, label="Media")
-    plt.fill_between(
-        np.arange(L),
-        mean_profile - std_profile,
-        mean_profile + std_profile,
-        alpha=0.3,
-        label="±1σ"
-    )
-    plt.title("Perfil temporal medio del canal")
-    plt.xlabel("Muestra temporal")
-    plt.ylabel("Amplitud media")
     plt.legend()
     plt.grid(alpha=0.3)
 
     if save_dir:
-        plt.savefig(os.path.join(save_dir, "mean_channel_profile.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(os.path.join(save_dir, "histogram_real_imag.png"), dpi=300, bbox_inches="tight")
     plt.show()
 
-    # Heatmap de canales
+    # Magnitud
+    magnitud = np.sqrt(real**2 + imag**2)
+    plt.figure(figsize=(6, 4))
+    plt.hist(magnitud.flatten(), bins=100, density=True, alpha=0.8)
+    plt.title("Distribución de la magnitud |H|")
+    plt.xlabel("Magnitud")
+    plt.ylabel("Densidad")
+    plt.grid(alpha=0.3)
+
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, "histogram_magnitud.png"), dpi=300, bbox_inches="tight")
+    plt.show()
+
+    # Perfil temporal medio del canal
+    mean_real = real.mean(axis=0)
+    std_real = real.std(axis=0)
+
+    mean_imag = imag.mean(axis=0)
+    std_imag = imag.std(axis=0)
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(mean_real, label="Media Real")
+    plt.fill_between(
+        np.arange(L),
+        mean_real - std_real,
+        mean_real + std_real,
+        alpha=0.3,
+    )
+    plt.title("Perfil temporal medio - Parte Real")
+    plt.xlabel("Muestra temporal")
+    plt.legend()
+    plt.grid(alpha=0.3)
+
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, "mean_real_profile.png"), dpi=300, bbox_inches="tight")
+    plt.show()
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(mean_imag, label="Media Imag")
+    plt.fill_between(
+        np.arange(L),
+        mean_imag - std_imag,
+        mean_imag + std_imag,
+        alpha=0.3
+    )
+    plt.title("Perfil temporal medio - Parte Imaginaria")
+    plt.xlabel("Muestra temporal")
+    plt.legend()
+    plt.grid(alpha=0.3)
+
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, "mean_imag_profile.png"), dpi=300, bbox_inches="tight")
+    plt.show()
+
+    # Heatmap (magnitud)
     idx = np.random.choice(N, min(heatmap_channels, N), replace=False)
-    subset = data[idx]
+    subset = magnitud[idx]
 
     plt.figure(figsize=(8, 6))
     plt.imshow(subset, aspect="auto", cmap="viridis")
-    plt.colorbar(label="Amplitud normalizada")
-    plt.title(f"Heatmap de canales reales ({subset.shape[0]} ejemplos)")
+    plt.colorbar(label="Magnitud")
+    plt.title(f"Heatmap de magnitud ({subset.shape[0]} canales)")
     plt.xlabel("Muestra temporal")
     plt.ylabel("Canal")
 
     if save_dir:
-        plt.savefig(os.path.join(save_dir, "heatmap_channels.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(os.path.join(save_dir, "heatmap_magnitud.png"), dpi=300, bbox_inches="tight")
     plt.show()
 
-    # Energía por canal
-    energy = np.sum(data ** 2, axis=1)
-
-    plt.figure(figsize=(6, 4))
-    plt.hist(energy, bins=100, alpha=0.8)
-    plt.title("Distribución de energía por canal")
-    plt.xlabel("Energía normalizada")
-    plt.ylabel("Número de canales")
-    plt.grid(alpha=0.3)
-
-    if save_dir:
-        plt.savefig(os.path.join(save_dir, "channel_energy.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+    print("\nAnálisis completado.")
 
 if __name__ == "__main__":
-    # load_nist_data("data/NIST_Samples.mat")
-    #
-    data = np.load("data/dataset_nist.npy")
-    #
-    # print("Shape:", data.shape)
-    # print("Tipo:", data.dtype)
-    # print("Primer canal:", data[0])
-
+    data = load_nist_data("data/NIST_Samples.mat", L=128, save_path="data/dataset_nist.npy")
+    print("Shape:", data.shape)
     analyze_dataset(data)

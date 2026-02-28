@@ -8,7 +8,8 @@ from scipy.stats import ks_2samp
 
 from train_Diffusion_Model import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
-from train_DCGAN_Conv1D import Generator
+#from train_DCGAN_Conv1D import Generator
+from train_WGAN import Generator
 
 def compute_energy(signals):
     """Energía total de cada señal"""
@@ -151,6 +152,18 @@ def generate_signals(model_type, model_checkpoint, num_samples,
         with torch.no_grad():
             z = torch.randn(num_samples, z_dim, device=device)
             fake = G(z).squeeze(1).cpu().numpy()
+
+    # WGAN-GP
+    elif model_type == 'wgan':
+        checkpoint = torch.load(model_checkpoint, map_location=device)
+        G = Generator(z_dim=z_dim, L=L).to(device)
+        G.load_state_dict(checkpoint['G'])
+        G.eval()
+
+        with torch.no_grad():
+            z = torch.randn(num_samples, z_dim, device=device)
+            fake = G(z).cpu().numpy()
+
     # DDPM: generación mediante proceso inverso de difusión
     elif model_type == 'ddpm':
         # cargar U-Net entrenada
@@ -298,9 +311,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="data/dataset_nist.npy")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--model_type", type=str, choices=['dcgan', 'ddpm'], default='dcgan')
+    parser.add_argument("--model_type", type=str, choices=['dcgan', 'wgan', 'ddpm'], default='dcgan')
     parser.add_argument("--save_dir", type=str, default="eval_results")
-    parser.add_argument("--z_dim", type=int, default=128)
+    parser.add_argument("--z_dim", type=int, default=64)
     parser.add_argument("--L", type=int, default=128)
     parser.add_argument("--num_eval", type=int, default=500)
     parser.add_argument("--device", type=str, default="cpu")
@@ -310,8 +323,13 @@ if __name__ == "__main__":
     base_save_dir = "eval_results"
     if args.model_type == "dcgan":
         args.save_dir = os.path.join(base_save_dir, "DCGAN_Conv1D")
+
+    elif args.model_type == "wgan":
+        args.save_dir = os.path.join(base_save_dir, "WGAN_GP_Conv1D")
+
     elif args.model_type == "ddpm":
-        args.save_dir = os.path.join(base_save_dir, "ddpm_Conv1D")
+        args.save_dir = os.path.join(base_save_dir, "DDPM_Conv1D")
+
     else:
         raise ValueError("model_type inválido")
 
