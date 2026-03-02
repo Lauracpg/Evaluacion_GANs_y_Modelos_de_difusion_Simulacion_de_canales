@@ -8,7 +8,7 @@ from scipy.stats import ks_2samp
 
 from train_Diffusion_Model import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
-#from train_DCGAN_Conv1D import Generator
+from train_DCGAN_Conv1D import Generator
 from train_WGAN import Generator
 
 def compute_energy(signals):
@@ -177,7 +177,7 @@ def generate_signals(model_type, model_checkpoint, num_samples,
 
         with torch.no_grad():
             # Inicialización desde ruido gaussiano puro
-            x = torch.randn(num_samples, 1, L, device=device)
+            x = torch.randn(num_samples, 2, L, device=device)
 
             # Proceso inverso de difusión: eliminar ruido paso a paso
             # desde t=T-1 hasta t=0
@@ -260,12 +260,43 @@ def main(args):
 
     txt_path = os.path.join(args.save_dir, "metrics.txt")
     with open(txt_path, "w") as f:
+        f.write("===== RESULTADOS EVALUACIÓN =====\n")
         f.write(f"Model type: {args.model_type}\n")
         f.write(f"Checkpoint: {args.model}\n")
         f.write(f"Num eval samples: {args.num_eval}\n")
-        f.write("-" * 40 + "\n")
+        f.write("=" * 50 + "\n\n")
+
+        # Métricas globales comparación
+        f.write("---- MÉTRICAS GLOBALES ----\n")
         for k in scalar_keys:
             f.write(f"{k}: {metrics[k]:.6f}\n")
+
+        f.write(f"RMS KS statistic: {metrics['rms_ks_stat']:.6f}\n")
+        f.write(f"RMS KS p_value: {metrics['rms_ks_pvalue']:.6f}\n")
+
+        f.write("\n")
+
+        # Estadísticas REALES
+        f.write("---- REAL CHANNEL STATS ----\n")
+        f.write(f"Avg delay real: {metrics['avg_real']:.6f}\n")
+        f.write(f"RMS delay real: {metrics['rms_real']:.6f}\n")
+        f.write(f"Mean PSD real: {np.mean(metrics['psd_real']):.6f}\n")
+
+        f.write("\n")
+
+        # Estadísticas GENERADAS
+        f.write("---- GENERATED CHANNEL STATS ----\n")
+        f.write(f"Avg delay fake: {metrics['avg_fake']:.6f}\n")
+        f.write(f"RMS delay fake: {metrics['rms_fake']:.6f}\n")
+        f.write(f"Mean PSD fake: {np.mean(metrics['psd_fake']):.6f}\n")
+
+        f.write("\n")
+
+        # Diferencias directas
+        f.write("---- DIFFERENCES ----\n")
+        f.write(f"Avg delay diff: {abs(metrics['avg_real'] - metrics['avg_fake']):.6f}\n")
+        f.write(f"RMS delay diff: {abs(metrics['rms_real'] - metrics['rms_fake']):.6f}\n")
+        f.write(f"Mean PSD diff: {abs(np.mean(metrics['psd_real']) - np.mean(metrics['psd_fake'])):.6f}\n")
 
     # Gráfico PDP
     plt.figure(figsize=(8, 4))
@@ -313,7 +344,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--model_type", type=str, choices=['dcgan', 'wgan', 'ddpm'], default='dcgan')
     parser.add_argument("--save_dir", type=str, default="eval_results")
-    parser.add_argument("--z_dim", type=int, default=64)
+    parser.add_argument("--z_dim", type=int, default=128)
     parser.add_argument("--L", type=int, default=128)
     parser.add_argument("--num_eval", type=int, default=500)
     parser.add_argument("--device", type=str, default="cpu")

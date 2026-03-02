@@ -77,7 +77,7 @@ class UNet1D(nn.Module):
         )
         # Encoder (downsampling)
         # extrae características a distintas escalas temporales
-        self.down1 = ConvBlock(1, 32)
+        self.down1 = ConvBlock(2, 32)
         self.down2 = ConvBlock(32, 64)
         self.pool = nn.MaxPool1d(2)
         # Bottleneck
@@ -88,7 +88,7 @@ class UNet1D(nn.Module):
         self.up1 = ConvBlock(128 + 64, 64)
         self.up2 = ConvBlock(64 + 32, 32)
         # Capa final: predicción del ruido (misma dimensión que la señal)
-        self.final = nn.Conv1d(32, 1, 1)
+        self.final = nn.Conv1d(32, 2, 1)
 
     def forward(self, x, t):
         """
@@ -197,7 +197,7 @@ def train():
     os.makedirs(args.save_dir, exist_ok=True)
     # cargar dataset
     data = np.load('data/dataset_nist.npy')
-    data = torch.from_numpy(data).float().unsqueeze(1)
+    data = torch.from_numpy(data).float()
 
     loader = DataLoader(
         TensorDataset(data),
