@@ -3,6 +3,41 @@ import os
 import h5py
 from matplotlib import pyplot as plt
 
+def load_synthetic_data(file_path, L=128, save_path="data/datos_sinteticos/TDL_D_85ns_fd50000_SNR20_h_real.npy"):
+    print(f"Cargando archivo: {file_path}")
+    H = np.load(file_path) # (128, 100000)
+    print("Shape original:", H.shape)
+    print("dtype:", H.dtype)
+    print("Primeros valores:\n", H[:5, :5])
+    print("Min:", H.min(), "Max:", H.max())
+
+    H= H[:L, :]
+    H = H.T # (100000, 128)
+    print(f"Shape canales: {H.shape}")
+
+    H_real = np.real(H)
+    H_imag = np.imag(H)
+
+    # norm energética
+    # energy = np.sqrt(np.sum(H_real**2 + H_imag**2, axis=1, keepdims=True))
+    # H_real = H_real / (energy + 1e-12)
+    # H_imag = H_imag / (energy + 1e-12)
+
+    dataset = np.stack([H_real, H_imag], axis=1).astype(np.float32)
+    print("Shape dataset:", dataset.shape)
+
+    # [-1, 1] global
+    max_abs = np.max(np.abs(dataset))
+    dataset = dataset / (max_abs + 1e-12)
+
+    print("Rango final:", dataset.min(), dataset.max())
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    np.save(save_path, dataset)
+    print("Dataset guardado en:", save_path)
+
+    return dataset
+
 def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
     print(f"Cargando archivo {mat_path} ...")
     f = h5py.File(mat_path, "r")
@@ -57,18 +92,6 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
         num_c = H_crop.shape[0]
         total_channels += num_c
 
-        # # convertir a magnitud
-        # H_mag = np.abs(H_crop)
-        #
-        # # normalizar cada canal a [-1,1]
-        # max_vals = np.max(H_mag, axis=1, keepdims=True)
-        # print("Primeros 5 valores max por canal:", max_vals[:5].flatten())
-        # H_mag = H_mag/(max_vals + 1e-12) # [0,1]
-        # H_mag = 2 * H_mag - 1 # [-1,1]
-        #
-        # print("Rango final: min =", H_mag.min(), " max =", H_mag.max())
-        # all_channels.append(H_mag.astype(np.float32))
-
         # Separar real e imaginario (SIN normalizar todavía)
         H_real = np.real(H_crop)
         H_imag = np.imag(H_crop)
@@ -77,6 +100,7 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
         energy = np.sqrt(np.sum(H_real**2 + H_imag**2, axis=1, keepdims=True))
         H_real = H_real / (energy + 1e-12)
         H_imag = H_imag / (energy + 1e-12)
+
 
         H_2_channel = np.stack([H_real, H_imag], axis=1)
         all_channels.append(H_2_channel.astype(np.float32))
@@ -91,15 +115,13 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
     print("=" * 60)
     print("Canales totales:", total_channels)
     print("Shape final:", dataset.shape)
-    print("Min:", dataset.min(), " Max:", dataset.max())
 
-    # [-1, 1]
+    # [-1, 1] normalización
     max_abs = np.max(np.abs(dataset))
     dataset = dataset / (max_abs + 1e-12)
 
-    print("\nRango final:")
-    print("Min:", dataset.min())
-    print("Max", dataset.max())
+    print("Max absoluto global:", max_abs)
+    print("Rango final:", dataset.min(), dataset.max())
 
     # guardar
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -235,6 +257,13 @@ def analyze_dataset(data, save_dir="data", num_examples=5, heatmap_channels=100)
     print("\nAnálisis completado.")
 
 if __name__ == "__main__":
-    data = load_nist_data("data/NIST_Samples.mat", L=128, save_path="data/dataset_nist.npy")
-    print("Shape:", data.shape)
+    #data = load_nist_data("data/NIST_Samples.mat", L=128, save_path="data/dataset_nist.npy")
+    #print("Shape:", data.shape)
+
+    data = load_synthetic_data(
+        "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
+        L=128,
+        save_path="data/datos_sinteticos/dataset_synthetic.npy"
+    )
+
     analyze_dataset(data)

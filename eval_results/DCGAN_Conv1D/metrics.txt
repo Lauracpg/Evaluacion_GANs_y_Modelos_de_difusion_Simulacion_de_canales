@@ -1,0 +1,38 @@
+===== RESULTADOS EVALUACION =====
+Model type: dcgan
+Checkpoint: checkpoints/DCGAN_Conv1D/model_best.pth
+Num eval samples: 500
+==================================================
+
+---- METRICAS GLOBALES ----
+pdp_mae: 0.000427
+avg_delay_mae: 0.394485
+rms_mae: 1.105023
+std_mae: 0.000439
+autocorr_mae: 0.006335
+psd_mae: 0.000090
+
+---- STATISTICAL TESTS ----
+RMS t-test statistic: 48.975679
+RMS t-test p_value: 3.223e-262
+AVG delay t-test statistic: 58.877496
+AVG delay t-test p_value: 7.249e-275
+
+---- REAL CHANNEL STATS ----
+Avg delay real: 1.337948
+RMS delay real: 8.596995
+Mean PSD real: 0.000141
+
+---- GENERATED CHANNEL STATS ----
+Avg delay fake: 0.943464
+RMS delay fake: 7.491972
+Mean PSD fake: 0.000062
+
+---- DIFFERENCES ----
+Avg delay diff: 0.394485
+RMS delay diff: 1.105023
+Mean PSD diff: 0.000079
+
+---- STATISTICAL INTERPRETATION ----
+RMS comparison: STATISTICALLY DIFFERENT
+AVG delay comparison: STATISTICALLY DIFFERENT

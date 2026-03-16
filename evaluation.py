@@ -4,12 +4,12 @@ import torch
 import os
 import matplotlib.pyplot as plt
 from scipy.signal import welch
-from scipy.stats import ks_2samp
+from scipy.stats import ttest_ind
 
-from train_Diffusion_Model import UNet1D, DDPM
+#from train_Diffusion_Model import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
 from train_DCGAN_Conv1D import Generator
-from train_WGAN import Generator
+#from train_WGAN import Generator
 
 def compute_energy(signals):
     """Energía total de cada señal"""
@@ -105,11 +105,23 @@ def evaluate_metrics(real, fake):
     metrics['rms_real'], metrics['rms_real_all'] = compute_rms_delay_spread(real)
     metrics['rms_fake'], metrics['rms_fake_all'] = compute_rms_delay_spread(fake)
     metrics['rms_mae'] = abs(metrics['rms_real'] - metrics['rms_fake'])
-    # KS-test para distribución RMS
-    ks_stat, p_value = ks_2samp(metrics['rms_real_all'],
-                                metrics['rms_fake_all'])
-    metrics['rms_ks_stat'] = ks_stat
-    metrics['rms_ks_pvalue'] = p_value
+
+    # T-Test Student
+    t_stat, t_pvalue = ttest_ind(
+        metrics['rms_real_all'],
+        metrics['rms_fake_all'],
+        equal_var=False
+    )
+    metrics['rms_t_stat'] = t_stat
+    metrics['rms_t_pvalue'] = t_pvalue
+
+    t_stat, t_pvalue = ttest_ind(
+        metrics['avg_real_all'],
+        metrics['avg_fake_all'],
+        equal_var=False
+    )
+    metrics['avg_t_stat'] = t_stat
+    metrics['avg_t_pvalue'] = t_pvalue
 
     # Métricas adicionales
     metrics['std_real'] = compute_std_per_tap(real)
@@ -198,8 +210,10 @@ def generate_signals(model_type, model_checkpoint, num_samples,
                     + torch.sqrt(beta) * z
                 )
             # guardar señal final x_0
-            x0 = x.squeeze(1)
-            x0= torch.clamp(x0, -1, 1) # [-1,1]
+            x0 = x
+            # energy = torch.sqrt(torch.sum(x0 ** 2, dim=2, keepdim=True))
+            # x0 = x0 / (energy + 1e-12)
+            x0 = torch.clamp(x0, -1, 1)
             fake = x0.cpu().numpy()
     else:
         raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
@@ -209,8 +223,11 @@ def generate_signals(model_type, model_checkpoint, num_samples,
 # MAIN
 def main(args):
     print("\n=== Cargando datos reales ===")
+    np.random.seed(42)
+    torch.manual_seed(42)
     data = np.load(args.data).astype(np.float32)
-    real_eval = data[:args.num_eval]  # primeras N señales
+    idx = np.random.choice(len(data), args.num_eval, replace=False)
+    real_eval = data[idx]
     print("Dataset cargado:", data.shape)
 
     print(f"\n=== Generando señales con {args.model_type.upper()} ===")
@@ -232,8 +249,6 @@ def main(args):
     for key in ['pdp_mae', 'avg_delay_mae', 'rms_mae',
                 'std_mae', 'autocorr_mae', 'psd_mae']:
         print(f"{key}: {metrics[key]:.6f}")
-    print(f"RMS KS statistic: {metrics['rms_ks_stat']:.6f}")
-    print(f"RMS KS p_value: {metrics['rms_ks_pvalue']:.6f}")
 
     print("\n--- MÉTRICAS REALES ---")
     print(f"Avg delay real: {metrics['avg_real']:.6f}")
@@ -259,20 +274,30 @@ def main(args):
     ]
 
     txt_path = os.path.join(args.save_dir, "metrics.txt")
+
+    def significado_ttest(p):
+        if p > 0.05:
+            return "STATISTICALLY SIMILAR"
+        else:
+            return "STATISTICALLY DIFFERENT"
+
     with open(txt_path, "w") as f:
-        f.write("===== RESULTADOS EVALUACIÓN =====\n")
+        f.write("===== RESULTADOS EVALUACION =====\n")
         f.write(f"Model type: {args.model_type}\n")
         f.write(f"Checkpoint: {args.model}\n")
         f.write(f"Num eval samples: {args.num_eval}\n")
         f.write("=" * 50 + "\n\n")
 
         # Métricas globales comparación
-        f.write("---- MÉTRICAS GLOBALES ----\n")
+        f.write("---- METRICAS GLOBALES ----\n")
         for k in scalar_keys:
             f.write(f"{k}: {metrics[k]:.6f}\n")
 
-        f.write(f"RMS KS statistic: {metrics['rms_ks_stat']:.6f}\n")
-        f.write(f"RMS KS p_value: {metrics['rms_ks_pvalue']:.6f}\n")
+        f.write("\n---- STATISTICAL TESTS ----\n")
+        f.write(f"RMS t-test statistic: {metrics['rms_t_stat']:.6f}\n")
+        f.write(f"RMS t-test p_value: {metrics['rms_t_pvalue']:.3e}\n")
+        f.write(f"AVG delay t-test statistic: {metrics['avg_t_stat']:.6f}\n")
+        f.write(f"AVG delay t-test p_value: {metrics['avg_t_pvalue']:.3e}\n")
 
         f.write("\n")
 
@@ -298,6 +323,15 @@ def main(args):
         f.write(f"RMS delay diff: {abs(metrics['rms_real'] - metrics['rms_fake']):.6f}\n")
         f.write(f"Mean PSD diff: {abs(np.mean(metrics['psd_real']) - np.mean(metrics['psd_fake'])):.6f}\n")
 
+        f.write("\n---- STATISTICAL INTERPRETATION ----\n")
+        f.write(
+            f"RMS comparison: "
+            f"{significado_ttest(metrics['rms_t_pvalue'])}\n"
+        )
+        f.write(
+            f"AVG delay comparison: "
+            f"{significado_ttest(metrics['avg_t_pvalue'])}\n"
+        )
     # Gráfico PDP
     plt.figure(figsize=(8, 4))
     plt.plot(metrics['pdp_real'], label="Real")
@@ -340,7 +374,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=str, default="data/dataset_nist.npy")
+    parser.add_argument("--data", type=str, default="data/datos_sinteticos/dataset_synthetic.npy")
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--model_type", type=str, choices=['dcgan', 'wgan', 'ddpm'], default='dcgan')
     parser.add_argument("--save_dir", type=str, default="eval_results")

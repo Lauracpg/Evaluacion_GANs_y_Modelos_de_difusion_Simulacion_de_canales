@@ -16,6 +16,10 @@ class Generator(nn.Module):
             nn.BatchNorm1d(128),
             nn.ReLU(True),
 
+            nn.ConvTranspose1d(128, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(128),
+            nn.ReLU(True),
+
             nn.ConvTranspose1d(128, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm1d(64),
             nn.ReLU(True),
@@ -24,16 +28,13 @@ class Generator(nn.Module):
             nn.BatchNorm1d(32),
             nn.ReLU(True),
 
-            nn.ConvTranspose1d(32, 2, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose1d(32, 2, kernel_size=3, padding=1),
             nn.Tanh()
         )
     def forward(self, z):
         x = self.fc(z)
         x = x.view(z.size(0), 128, self.init_len)
         x = self.net(x)
-        # normalización por energía
-        #energy = torch.sqrt(torch.sum(x ** 2, dim=2, keepdim=True))
-        #x = x / (energy + 1e-12)
         return x
 
 # ----- DISCRIMINATOR Conv1D ----- #
@@ -96,7 +97,7 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
             ### Entrenar Discriminador ###
             optD.zero_grad()
             # ruido leve en señales reales (ruido de medición)
-            real_noisy = real + 0.01 * torch.randn_like(real)
+            real_noisy = real + 0.002 * torch.randn_like(real)
             # etiquetas suavizadas
             real_labels = torch.full((bsize, 1), 0.9, device=device)
             fake_labels = torch.full((bsize, 1), 0.1, device=device)
@@ -163,16 +164,16 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
 if __name__ == "__main__":
     ### Parámetros de ejecución ###
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='data/dataset_nist.npy', help='Ruta del dataset .npy')
-    parser.add_argument('--epochs', type=int, default=100, help='Número de épocas de entrenamiento')
-    parser.add_argument('--batch_size', type=int, default=64, help='Tamaño del batch')
+    parser.add_argument('--data', type=str, default='data/datos_sinteticos/dataset_synthetic.npy', help='Ruta del dataset .npy')
+    parser.add_argument('--epochs', type=int, default=200, help='Número de épocas de entrenamiento')
+    parser.add_argument('--batch_size', type=int, default=128, help='Tamaño del batch')
     parser.add_argument('--z_dim', type=int, default=128, help='Dimensión del vector de ruido del generador')
     parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
     parser.add_argument('--save_dir', type=str, default='checkpoints/DCGAN_Conv1D',
                         help='Carpeta donde guardar checkpoints')
     parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
-    parser.add_argument('--patience', type=int, default=10, help='Paciencia para early stopping')
-    parser.add_argument('--min_delta', type=float, default=1e-4, help='Mejora mínima en G_loss')
+    parser.add_argument('--patience', type=int, default=40, help='Paciencia para early stopping')
+    parser.add_argument('--min_delta', type=float, default=1e-5, help='Mejora mínima en G_loss')
 
     args = parser.parse_args()
 
