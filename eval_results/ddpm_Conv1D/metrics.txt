@@ -1,13 +1,38 @@
+===== RESULTADOS EVALUACION =====
 Model type: ddpm
 Checkpoint: checkpoints/ddpm/best_model.pth
 Num eval samples: 500
-----------------------------------------
-pdp_mae: 0.059402
-avg_delay_mae: 17.132860
-rms_mae: 16.688505
-energy_mae: 4.884932
-std_mae: 0.106670
-autocorr_mae: 0.051798
-psd_mae: 0.022895
-diversity_fake: 4.421551
-diversity_real: 0.912805
+==================================================
+
+---- METRICAS GLOBALES ----
+pdp_mae: 0.000154
+avg_delay_mae: 0.010057
+rms_mae: 0.032620
+std_mae: 0.003867
+autocorr_mae: 0.004695
+psd_mae: 0.000060
+
+---- STATISTICAL TESTS ----
+RMS t-test statistic: -0.369192
+RMS t-test p_value: 7.121e-01
+AVG delay t-test statistic: -0.317757
+AVG delay t-test p_value: 7.508e-01
+
+---- REAL CHANNEL STATS ----
+Avg delay real: 1.337948
+RMS delay real: 8.596995
+Mean PSD real: 0.000141
+
+---- GENERATED CHANNEL STATS ----
+Avg delay fake: 1.348005
+RMS delay fake: 8.629615
+Mean PSD fake: 0.000093
+
+---- DIFFERENCES ----
+Avg delay diff: 0.010057
+RMS delay diff: 0.032620
+Mean PSD diff: 0.000048
+
+---- STATISTICAL INTERPRETATION ----
+RMS comparison: STATISTICALLY SIMILAR
+AVG delay comparison: STATISTICALLY SIMILAR

@@ -22,10 +22,10 @@ class ConvBlock(nn.Module):
         # kernel_size=3 y padding=1 preservan la longitud de la señal
         self.net = nn.Sequential(
             nn.Conv1d(in_c, out_c, 3, padding=1),
-            nn.BatchNorm1d(out_c), # estabiliza el entrenamiento
-            nn.SiLU(), # activación suave
+            nn.GroupNorm(num_groups=8, num_channels=out_c),
+            nn.SiLU(),
             nn.Conv1d(out_c, out_c, 3, padding=1),
-            nn.BatchNorm1d(out_c),
+            nn.GroupNorm(num_groups=8, num_channels=out_c),
             nn.SiLU()
         )
 
@@ -102,6 +102,9 @@ class UNet1D(nn.Module):
         x2 = self.down2(self.pool(x1)) # nivel 2
         # Bottleneck
         x_mid = self.mid(self.pool(x2))
+        # expandir embeddings temporal a la dimensión temporal de x_mid
+        t_emb = self.time_mlp(t).unsqueeze(-1)
+        t_emb = t_emb.expand(-1, -1, x_mid.size(2))
         # Inyección del tiempo (condicionamiento temporal)
         x_mid = x_mid + t_emb
         # Decoder
@@ -196,7 +199,7 @@ def train():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(args.save_dir, exist_ok=True)
     # cargar dataset
-    data = np.load('data/dataset_nist.npy')
+    data = np.load('data/datos_sinteticos/dataset_synthetic.npy')
     data = torch.from_numpy(data).float()
 
     loader = DataLoader(
