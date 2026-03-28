@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 from scipy.stats import ttest_ind
 
+from train_DDIM import Diffusion, DDIMSampler
 from train_DDPM import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
 #from train_DCGAN_Conv1D import Generator
@@ -229,6 +230,22 @@ def generate_signals(model_type, model_checkpoint, num_samples,
             # x0 = x0 / (energy + 1e-12)
             x0 = torch.clamp(x0, -1, 1)
             fake = x0.cpu().numpy()
+    elif model_type == 'ddim':
+        checkpoint = torch.load(model_checkpoint, map_location=device)
+
+        unet = UNet1D().to(device)
+        unet.load_state_dict(checkpoint)
+        unet.eval()
+
+        diffusion = Diffusion(unet, T=ddpm_steps).to(device)
+        sampler = DDIMSampler(diffusion, eta=0.0)  # determinista
+
+        with torch.no_grad():
+            fake = sampler.sample(
+                shape=(num_samples, 2, L),
+                device=device,
+                steps=50   # menos pasos que DDPM
+            ).cpu().numpy()
     else:
         raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
 
@@ -413,7 +430,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="data/datos_sinteticos/dataset_synthetic.npy")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--model_type", type=str, choices=['dcgan', 'wgan', 'ddpm'], default='dcgan')
+    parser.add_argument("--model_type", type=str, choices=['dcgan', 'wgan', 'ddpm', 'ddim'], default='dcgan')
     parser.add_argument("--save_dir", type=str, default="eval_results")
     parser.add_argument("--z_dim", type=int, default=64)
     parser.add_argument("--L", type=int, default=128)
@@ -432,6 +449,9 @@ if __name__ == "__main__":
 
     elif args.model_type == "ddpm":
         args.save_dir = os.path.join(base_save_dir, "DDPM_Conv1D")
+
+    elif args.model_type == "ddim":
+        args.save_dir = os.path.join(base_save_dir, "DDIM_Conv1D")
 
     else:
         raise ValueError("model_type inválido")
