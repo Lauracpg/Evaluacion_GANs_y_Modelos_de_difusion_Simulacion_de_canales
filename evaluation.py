@@ -6,10 +6,13 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 from scipy.stats import ttest_ind
 
-#from train_Diffusion_Model import UNet1D, DDPM
+from train_Diffusion_Model import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
-from train_DCGAN_Conv1D import Generator
-#from train_WGAN import Generator
+#from train_DCGAN_Conv1D import Generator
+from train_WGAN import Generator
+
+def to_db(x, eps=1e-10):
+    return 10 * np.log10(np.maximum(x, eps))
 
 def compute_energy(signals):
     """Energía total de cada señal"""
@@ -40,12 +43,12 @@ def compute_pdp(signals):
     power = np.abs(signals) ** 2
     return np.mean(power, axis=0)
 
-def compute_average_delay(signals):
+def compute_average_delay(signals, delta_tau=1.0):
     """
     Average delay por señal y luego promedio global.
     """
     N, L = signals.shape
-    delays = np.arange(L)
+    delays = np.arange(L) * delta_tau
     avg_delays = []
     for s in signals:
         power = np.abs(s) ** 2
@@ -56,12 +59,12 @@ def compute_average_delay(signals):
     avg_delays = np.array(avg_delays)
     return np.mean(avg_delays), avg_delays
 
-def compute_rms_delay_spread(signals):
+def compute_rms_delay_spread(signals, delta_tau=1.0):
     """
     RMS delay spread por señal y luego promedio global.
     """
     N, L = signals.shape
-    delays = np.arange(L)
+    delays = np.arange(L) * delta_tau
     rms_values = []
     for s in signals:
         power = np.abs(s) ** 2
@@ -69,13 +72,9 @@ def compute_rms_delay_spread(signals):
         mean_delay = np.sum(delays * power) / total_power
         rms = np.sqrt(np.sum(power * (delays - mean_delay) ** 2) / total_power)
         rms_values.append(rms)
+
     rms_values = np.array(rms_values)
     return np.mean(rms_values), rms_values
-
-    avg_delay = compute_average_delay(signals)
-    num = np.sum(power * (delays - avg_delay) ** 2)
-    den = np.sum(power) + 1e-12
-    return np.sqrt(num / den)
 
 def compute_psd(signals, fs=1.0):
     """PSD promedio de las señales"""
@@ -89,7 +88,7 @@ def compute_psd(signals, fs=1.0):
 def mae(a, b):
     return np.mean(np.abs(a - b))
 
-def evaluate_metrics(real, fake):
+def evaluate_metrics(real, fake, delta_tau=1.0):
     """Calcula todas las métricas y devuelve un diccionario con resultados y datos para gráficas."""
     metrics = {}
 
@@ -97,15 +96,25 @@ def evaluate_metrics(real, fake):
     metrics['pdp_real'] = compute_pdp(real)
     metrics['pdp_fake'] = compute_pdp(fake)
     metrics['pdp_mae'] = mae(metrics['pdp_real'], metrics['pdp_fake'])
-    # Average delay por señal
-    metrics['avg_real'], metrics['avg_real_all'] = compute_average_delay(real)
-    metrics['avg_fake'], metrics['avg_fake_all'] = compute_average_delay(fake)
-    metrics['avg_delay_mae'] = abs(metrics['avg_real'] - metrics['avg_fake'])
-    # RMS delay spread por señal
-    metrics['rms_real'], metrics['rms_real_all'] = compute_rms_delay_spread(real)
-    metrics['rms_fake'], metrics['rms_fake_all'] = compute_rms_delay_spread(fake)
-    metrics['rms_mae'] = abs(metrics['rms_real'] - metrics['rms_fake'])
+    metrics['pdp_real_db'] = to_db(metrics['pdp_real'])
+    metrics['pdp_fake_db'] = to_db(metrics['pdp_fake'])
 
+    mask = metrics['pdp_real'] > 1e-6  # o equivalente en potencia
+    metrics['pdp_mae_db'] = np.mean(
+        np.abs(metrics['pdp_real_db'][mask] - metrics['pdp_fake_db'][mask])
+    )
+
+    # Average delay por señal
+    metrics['avg_real'], metrics['avg_real_all'] = compute_average_delay(real, delta_tau)
+    metrics['avg_fake'], metrics['avg_fake_all'] = compute_average_delay(fake, delta_tau)
+    metrics['avg_delay_mae'] = abs(metrics['avg_real'] - metrics['avg_fake'])
+    metrics['avg_delay_mae_ns'] = metrics['avg_delay_mae'] * 1e9
+
+    # RMS delay spread por señal
+    metrics['rms_real'], metrics['rms_real_all'] = compute_rms_delay_spread(real, delta_tau)
+    metrics['rms_fake'], metrics['rms_fake_all'] = compute_rms_delay_spread(fake, delta_tau)
+    metrics['rms_mae'] = abs(metrics['rms_real'] - metrics['rms_fake'])
+    metrics['rms_mae_ns'] = metrics['rms_mae'] * 1e9
     # T-Test Student
     t_stat, t_pvalue = ttest_ind(
         metrics['rms_real_all'],
@@ -141,7 +150,12 @@ def evaluate_metrics(real, fake):
     metrics['psd_fake'], _ = compute_psd(fake)
     metrics['psd_mae'] = mae(metrics['psd_real'], metrics['psd_fake'])
 
+    metrics['psd_real_db'] = to_db(metrics['psd_real'])
+    metrics['psd_fake_db'] = to_db(metrics['psd_fake'])
+    metrics['psd_mae_db'] = mae(metrics['psd_real_db'], metrics['psd_fake_db'])
+
     return metrics
+
 
 def generate_signals(model_type, model_checkpoint, num_samples,
                      device, z_dim=32, L=128, ddpm_steps=1000):
@@ -205,9 +219,9 @@ def generate_signals(model_type, model_checkpoint, num_samples,
 
                 # ecuación de muestreo DDPM (simplificada)
                 x = (
-                    (1 / torch.sqrt(1-beta)) *
-                    (x - beta / torch.sqrt(1 - ddpm.alphas_cumprod[t]) * noise_pred)
-                    + torch.sqrt(beta) * z
+                        (1 / torch.sqrt(1 - beta)) *
+                        (x - beta / torch.sqrt(1 - ddpm.alphas_cumprod[t]) * noise_pred)
+                        + torch.sqrt(beta) * z
                 )
             # guardar señal final x_0
             x0 = x
@@ -232,33 +246,47 @@ def main(args):
 
     print(f"\n=== Generando señales con {args.model_type.upper()} ===")
     fake_eval = generate_signals(
-        args.model_type,args.model, args.num_eval,args.device,
-        z_dim=args.z_dim, L=args.L,ddpm_steps=args.ddpm_steps
+        args.model_type, args.model, args.num_eval, args.device,
+        z_dim=args.z_dim, L=args.L, ddpm_steps=args.ddpm_steps
     )
     print("Señales generadas:", fake_eval.shape)
 
-    real_eval_complex = real_eval[:,0,:] + 1j * real_eval[:,1,:]
-    fake_eval_complex = fake_eval[:,0,:] + 1j * fake_eval[:,1,:]
+    real_eval_complex = real_eval[:, 0, :] + 1j * real_eval[:, 1, :]
+    fake_eval_complex = fake_eval[:, 0, :] + 1j * fake_eval[:, 1, :]
     real_mag = np.abs(real_eval_complex)
     fake_mag = np.abs(fake_eval_complex)
 
     # calcular métricas
-    metrics = evaluate_metrics(real_mag, fake_mag)
+    metrics = evaluate_metrics(real_mag, fake_mag, delta_tau=args.delta_tau)
 
     print("\n--- RESULTADOS ---")
-    for key in ['pdp_mae', 'avg_delay_mae', 'rms_mae',
-                'std_mae', 'autocorr_mae', 'psd_mae']:
-        print(f"{key}: {metrics[key]:.6f}")
+    for key in ['pdp_mae', 'pdp_mae_db',
+                'avg_delay_mae_ns', 'rms_mae_ns',
+                'std_mae', 'autocorr_mae',
+                'psd_mae', 'psd_mae_db']:
+        if key in ['avg_delay_mae_ns', 'rms_mae_ns']:
+            print(f"{key}: {metrics[key]:.3f} ns")
+
+        elif key == 'pdp_mae_db':
+            print(f"{key}: {metrics[key]:.3f} dB")
+
+        elif key == 'psd_mae_db':
+            print(f"{key}: {metrics[key]:.3f} dB/Hz")
+
+        else:
+            print(f"{key}: {metrics[key]:.6f}")
+
+    ns = 1e9
 
     print("\n--- MÉTRICAS REALES ---")
-    print(f"Avg delay real: {metrics['avg_real']:.6f}")
-    print(f"RMS delay real: {metrics['rms_real']:.6f}")
-    print(f"Mean PSD real: {np.mean(metrics['psd_real']):.6f}")
+    print(f"Avg delay real: {metrics['avg_real'] * ns:.3f} ns")
+    print(f"RMS delay real: {metrics['rms_real'] * ns:.3f} ns")
+    print(f"Mean PSD real: {np.mean(metrics['psd_real_db']):.3f} dB/Hz")
 
     print("\n--- MÉTRICAS GENERADAS ---")
-    print(f"Avg delay fake: {metrics['avg_fake']:.6f}")
-    print(f"RMS delay fake: {metrics['rms_fake']:.6f}")
-    print(f"Mean PSD fake: {np.mean(metrics['psd_fake']):.6f}")
+    print(f"Avg delay fake: {metrics['avg_fake'] * ns:.3f} ns")
+    print(f"RMS delay fake: {metrics['rms_fake'] * ns:.3f} ns")
+    print(f"Mean PSD fake: {np.mean(metrics['psd_fake_db']):.3f} dB/Hz")
 
     # Guardar resultados
     os.makedirs(args.save_dir, exist_ok=True)
@@ -266,11 +294,13 @@ def main(args):
 
     scalar_keys = [
         'pdp_mae',
-        'avg_delay_mae',
-        'rms_mae',
+        'pdp_mae_db',
+        'avg_delay_mae_ns',
+        'rms_mae_ns',
         'std_mae',
         'autocorr_mae',
         'psd_mae',
+        'psd_mae_db',
     ]
 
     txt_path = os.path.join(args.save_dir, "metrics.txt")
@@ -291,7 +321,14 @@ def main(args):
         # Métricas globales comparación
         f.write("---- METRICAS GLOBALES ----\n")
         for k in scalar_keys:
-            f.write(f"{k}: {metrics[k]:.6f}\n")
+            if k in ['avg_delay_mae_ns', 'rms_mae_ns']:
+                f.write(f"{k}: {metrics[k]:.3f} ns\n")
+            elif k == 'pdp_mae_db':
+                f.write(f"{k}: {metrics[k]:.3f} dB\n")
+            elif k == 'psd_mae_db':
+                f.write(f"{k}: {metrics[k]:.3f} dB/Hz\n")
+            else:
+                f.write(f"{k}: {metrics[k]:.6f}\n")
 
         f.write("\n---- STATISTICAL TESTS ----\n")
         f.write(f"RMS t-test statistic: {metrics['rms_t_stat']:.6f}\n")
@@ -303,25 +340,18 @@ def main(args):
 
         # Estadísticas REALES
         f.write("---- REAL CHANNEL STATS ----\n")
-        f.write(f"Avg delay real: {metrics['avg_real']:.6f}\n")
-        f.write(f"RMS delay real: {metrics['rms_real']:.6f}\n")
-        f.write(f"Mean PSD real: {np.mean(metrics['psd_real']):.6f}\n")
+        f.write(f"Avg delay real: {metrics['avg_real'] * 1e9:.3f} ns\n")
+        f.write(f"RMS delay real: {metrics['rms_real'] * 1e9:.3f} ns\n")
+        f.write(f"Mean PSD real: {np.mean(metrics['psd_real_db']):.3f} dB/Hz\n")
 
         f.write("\n")
 
         # Estadísticas GENERADAS
         f.write("---- GENERATED CHANNEL STATS ----\n")
-        f.write(f"Avg delay fake: {metrics['avg_fake']:.6f}\n")
-        f.write(f"RMS delay fake: {metrics['rms_fake']:.6f}\n")
-        f.write(f"Mean PSD fake: {np.mean(metrics['psd_fake']):.6f}\n")
-
+        f.write(f"Avg delay fake: {metrics['avg_fake'] * 1e9:.3f} ns\n")
+        f.write(f"RMS delay fake: {metrics['rms_fake'] * 1e9:.3f} ns\n")
+        f.write(f"Mean PSD fake: {np.mean(metrics['psd_fake_db']):.3f} dB/Hz\n")
         f.write("\n")
-
-        # Diferencias directas
-        f.write("---- DIFFERENCES ----\n")
-        f.write(f"Avg delay diff: {abs(metrics['avg_real'] - metrics['avg_fake']):.6f}\n")
-        f.write(f"RMS delay diff: {abs(metrics['rms_real'] - metrics['rms_fake']):.6f}\n")
-        f.write(f"Mean PSD diff: {abs(np.mean(metrics['psd_real']) - np.mean(metrics['psd_fake'])):.6f}\n")
 
         f.write("\n---- STATISTICAL INTERPRETATION ----\n")
         f.write(
@@ -334,27 +364,33 @@ def main(args):
         )
     # Gráfico PDP
     plt.figure(figsize=(8, 4))
-    plt.plot(metrics['pdp_real'], label="Real")
-    plt.plot(metrics['pdp_fake'], label="Generado")
-    plt.title("PDP Real vs Generado")
+    delays = np.arange(len(metrics['pdp_real_db'])) * args.delta_tau * 1e9  # ns
+    plt.plot(delays, metrics['pdp_real_db'], label="Real")
+    plt.plot(delays, metrics['pdp_fake_db'], label="Generado")
+    plt.title("PDP (dB) Real vs Generado")
+    plt.xlabel("Delay (ns)")
+    plt.ylabel("Power (dB)")
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(args.save_dir, 'pdp.png'))
 
     # Histograma de magnitudes
     plt.figure(figsize=(8, 4))
-    plt.bar(metrics['bins_real'],metrics['hist_real'],width=0.03, alpha=0.6, label="Real")
+    plt.bar(metrics['bins_real'], metrics['hist_real'], width=0.03, alpha=0.6, label="Real")
     plt.bar(metrics['bins_fake'], metrics['hist_fake'], width=0.03, alpha=0.6, label="Generado")
     plt.title("Histograma de magnitudes")
+    plt.xlabel("|h[n]|")
+    plt.ylabel("Probability Density")
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(args.save_dir, 'histograma.png'))
 
     # Gráfico PSD
     plt.figure(figsize=(8, 4))
-    plt.semilogy(metrics['freqs'], metrics['psd_real'], label='Real')
-    plt.semilogy(metrics['freqs'],metrics['psd_fake'], label='Generado')
-    plt.title("PSD Real vs Generado")
+    plt.plot(metrics['freqs'], metrics['psd_real_db'], label='Real')
+    plt.plot(metrics['freqs'], metrics['psd_fake_db'], label='Generado')
+    plt.title("PSD (db/Hz) Real vs Generado")
+    plt.xlabel("Frequency (Hz)")
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(args.save_dir, "psd.png"))
@@ -363,10 +399,11 @@ def main(args):
     num_plot = min(8, args.num_eval)
     plt.figure(figsize=(12, 6))
     for i in range(num_plot):
-        plt.subplot(4,2,i+1)
+        plt.subplot(4, 2, i + 1)
         plt.plot(real_mag[i], label='Real')
-        plt.plot(fake_mag[i], '--',label='Generado')
-        plt.xticks([]); plt.yticks([])
+        plt.plot(fake_mag[i], '--', label='Generado')
+        plt.xticks([]);
+        plt.yticks([])
     plt.suptitle(f"Comparación señales reales vs {args.model_type.upper()}")
     plt.legend(loc='upper right', fontsize=8)
     plt.tight_layout()
@@ -378,11 +415,12 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--model_type", type=str, choices=['dcgan', 'wgan', 'ddpm'], default='dcgan')
     parser.add_argument("--save_dir", type=str, default="eval_results")
-    parser.add_argument("--z_dim", type=int, default=128)
+    parser.add_argument("--z_dim", type=int, default=64)
     parser.add_argument("--L", type=int, default=128)
     parser.add_argument("--num_eval", type=int, default=500)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--ddpm_steps", type=int, default=1000)
+    parser.add_argument("--delta_tau", type=float, default=1e-9)  # segundos (ej: 1 ns)
     args = parser.parse_args()
 
     base_save_dir = "eval_results"

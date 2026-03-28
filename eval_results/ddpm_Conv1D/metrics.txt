@@ -6,11 +6,13 @@ Num eval samples: 500
 
 ---- METRICAS GLOBALES ----
 pdp_mae: 0.000154
-avg_delay_mae: 0.010057
-rms_mae: 0.032620
+pdp_mae_db: 5.194 dB
+avg_delay_mae_ns: 0.010 ns
+rms_mae_ns: 0.033 ns
 std_mae: 0.003867
 autocorr_mae: 0.004695
 psd_mae: 0.000060
+psd_mae_db: 3.864 dB/Hz
 
 ---- STATISTICAL TESTS ----
 RMS t-test statistic: -0.369192
@@ -19,19 +21,15 @@ AVG delay t-test statistic: -0.317757
 AVG delay t-test p_value: 7.508e-01
 
 ---- REAL CHANNEL STATS ----
-Avg delay real: 1.337948
-RMS delay real: 8.596995
-Mean PSD real: 0.000141
+Avg delay real: 1.338 ns
+RMS delay real: 8.597 ns
+Mean PSD real: -41.694 dB/Hz
 
 ---- GENERATED CHANNEL STATS ----
-Avg delay fake: 1.348005
-RMS delay fake: 8.629615
-Mean PSD fake: 0.000093
+Avg delay fake: 1.348 ns
+RMS delay fake: 8.630 ns
+Mean PSD fake: -43.010 dB/Hz
 
----- DIFFERENCES ----
-Avg delay diff: 0.010057
-RMS delay diff: 0.032620
-Mean PSD diff: 0.000048
 
 ---- STATISTICAL INTERPRETATION ----
 RMS comparison: STATISTICALLY SIMILAR
