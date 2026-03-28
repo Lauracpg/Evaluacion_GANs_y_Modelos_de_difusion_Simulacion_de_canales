@@ -7,6 +7,8 @@ from torch.utils.data import DataLoader, TensorDataset
 import argparse
 import os
 
+# Denoising diffusion probabilistic model DDPM
+
 class ConvBlock(nn.Module):
     """
     Bloque convolucional 1D básico usado en la U-Net.

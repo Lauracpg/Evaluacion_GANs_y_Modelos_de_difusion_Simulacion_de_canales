@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 from scipy.stats import ttest_ind
 
-from train_Diffusion_Model import UNet1D, DDPM
+from train_DDPM import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
 #from train_DCGAN_Conv1D import Generator
 from train_WGAN import Generator
