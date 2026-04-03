@@ -60,25 +60,25 @@ class UNet1D(nn.Module):
         # embedding del tiempo
         self.time_mlp = nn.Sequential(
             TimeEmbedding(64),
-            nn.Linear(64, 128),
+            nn.Linear(64, 256),
             nn.SiLU()
         )
 
         # encoder
-        self.down1 = ConvBlock(2, 32)
-        self.down2 = ConvBlock(32, 64)
+        self.down1 = ConvBlock(2, 64)
+        self.down2 = ConvBlock(64, 128)
         # reduce resolución
         self.pool = nn.MaxPool1d(2)
 
         # capa intermedia (representación comprimida)
-        self.mid = ConvBlock(64, 128)
+        self.mid = ConvBlock(128, 256)
 
         # decoder
-        self.up1 = ConvBlock(128 + 64, 64)
-        self.up2 = ConvBlock(64 + 32, 32)
+        self.up1 = ConvBlock(256 + 128, 128)
+        self.up2 = ConvBlock(128 + 64, 64)
 
         # salida: predicción del ruido
-        self.final = nn.Conv1d(32, 2, 1)
+        self.final = nn.Conv1d(64, 2, 1)
 
     def forward(self, x, t):
         # embedding del timestep
@@ -93,16 +93,13 @@ class UNet1D(nn.Module):
 
         # añadir información del tiempo
         t_emb = t_emb.expand(-1, -1, x_mid.size(2))
-
         x_mid = x_mid + t_emb
 
         # decoder
         x = F.interpolate(x_mid, scale_factor=2)
-
         x = self.up1(torch.cat([x, x2], dim=1))
 
         x = F.interpolate(x, scale_factor=2)
-
         x = self.up2(torch.cat([x, x1], dim=1))
 
         return self.final(x)
@@ -244,6 +241,8 @@ def train():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=2e-4)
     parser.add_argument('--save_dir', type=str, default='checkpoints/ddim')
+    parser.add_argument('--patience', type=int, default=20)
+    parser.add_argument('--min_delta', type=float, default=1e-4)
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -264,7 +263,7 @@ def train():
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     best_loss = float('inf')
-
+    epochs_no_improve = 0
     for epoch in range(args.epochs):
         loss_avg = 0
 
@@ -289,8 +288,17 @@ def train():
 
         if loss_avg < best_loss:
             best_loss = loss_avg
+            epochs_no_improve = 0
             torch.save(model.state_dict(),
                        os.path.join(args.save_dir, "best_model.pth"))
+            print(f"Nuevo mejor modelo guardado (loss={best_loss:.6f})")
+        else:
+            epochs_no_improve += 1
+            print(f"Sin mejora ({epochs_no_improve}/{args.patience})")
+
+        if epochs_no_improve >= args.patience:
+            print(f"\nEarly stopping en epoch {epoch}")
+            break
 
         if epoch % 10 == 0:
             torch.save(model.state_dict(),
