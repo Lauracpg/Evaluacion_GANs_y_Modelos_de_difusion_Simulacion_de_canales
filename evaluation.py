@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 from scipy.stats import ttest_ind
 
-from train_DDIM import Diffusion, DDIMSampler
-from train_DDPM import UNet1D, DDPM
+from train_DDIM import Diffusion, DDIMSampler, UNet1D
+#from train_DDPM import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
 #from train_DCGAN_Conv1D import Generator
 from train_WGAN import Generator
@@ -244,7 +244,7 @@ def generate_signals(model_type, model_checkpoint, num_samples,
             fake = sampler.sample(
                 shape=(num_samples, 2, L),
                 device=device,
-                steps=50   # menos pasos que DDPM
+                steps=100   # menos pasos que DDPM
             ).cpu().numpy()
     else:
         raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
@@ -437,7 +437,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_eval", type=int, default=500)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--ddpm_steps", type=int, default=1000)
-    parser.add_argument("--delta_tau", type=float, default=1e-9)  # segundos (ej: 1 ns)
+    parser.add_argument("--delta_tau", type=float, default=1e-8)
     args = parser.parse_args()
 
     base_save_dir = "eval_results"
