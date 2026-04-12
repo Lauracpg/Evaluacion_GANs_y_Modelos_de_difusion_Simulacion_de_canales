@@ -123,7 +123,7 @@ def cosine_beta_schedule(T):
 # implementa el proceso forward: q(xt | x0)
 # añade ruido progresivamente a la señal
 class Diffusion(nn.Module):
-    def __init__(self, model, T=1000):
+    def __init__(self, model, T=1000, data=None):
         super().__init__()
         self.model = model
 
@@ -143,6 +143,19 @@ class Diffusion(nn.Module):
 
         self.register_buffer('sqrt_alpha_bar', torch.sqrt(alpha_bar))
         self.register_buffer('sqrt_one_minus', torch.sqrt(1 - alpha_bar))
+
+        if data is not None:
+            mag = np.abs(data[:, 0, :] + 1j * data[:, 1, :])
+            pdp = np.mean(mag ** 2, axis=0)  # (L,)
+            pdp_norm = pdp / (pdp.max() + 1e-12)
+
+            # peso = 1 + escala * pdp normalizado
+            tap_weights = 1.0 + 9.0 * pdp_norm  # rango [1, 10]
+            tap_weights = torch.tensor(tap_weights, dtype=torch.float32)
+        else:
+            tap_weights = torch.ones(128)
+
+        self.register_buffer('tap_weights', tap_weights)
 
     # FORWARD DIFFUSION
     # genera xt a partir de x0
@@ -171,8 +184,9 @@ class Diffusion(nn.Module):
         # predicción del ruido
         noise_pred = self.model(xt, t)
 
-        # minimizar error entre ruido real y estimado
-        return F.mse_loss(noise_pred, noise)
+        # pesos con forma (1, 1, L) para broadcasting
+        weights = self.tap_weights.view(1, 1, -1)
+        return (weights * (noise_pred - noise) ** 2).mean()
 
 # genera nuevas señales a partir de ruido puro
 # DDIm permite usar menos pasos
@@ -248,8 +262,8 @@ def train():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(args.save_dir, exist_ok=True)
 
-    data = np.load('data/datos_sinteticos/dataset_synthetic.npy')
-    data = torch.from_numpy(data).float()
+    data_np = np.load('data/datos_sinteticos/dataset_synthetic.npy')
+    data = torch.from_numpy(data_np).float()
 
     loader = DataLoader(
         TensorDataset(data),
@@ -258,7 +272,7 @@ def train():
     )
 
     model = UNet1D().to(device)
-    diffusion = Diffusion(model).to(device)
+    diffusion = Diffusion(model, data=data_np).to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
@@ -305,4 +319,27 @@ def train():
                        os.path.join(args.save_dir, f"model_{epoch}.pth"))
 
 if __name__ == "__main__":
+    # data = np.load('data/datos_sinteticos/dataset_synthetic.npy')
+    # print("Shape:", data.shape)
+    # print("Rango:", data.min(), data.max())
+    #
+    # # energía por tap
+    # mag = np.abs(data[:, 0, :] + 1j * data[:, 1, :])
+    # pdp = np.mean(mag ** 2, axis=0)
+    # print("PDP primeros 10 taps:", pdp[:10])
+    # print("PDP últimos 10 taps:", pdp[-10:])
+    # print("Tap con máxima energía:", np.argmax(pdp))
+    # print("RMS delay medio (ns):", )
+    #
+    # delays = np.arange(128) * 1e-8
+    # rms_values = []
+    # for s in mag:
+    #     power = s ** 2
+    #     total = np.sum(power) + 1e-12
+    #     mean_d = np.sum(delays * power) / total
+    #     rms = np.sqrt(np.sum(power * (delays - mean_d) ** 2) / total)
+    #     rms_values.append(rms)
+    # print(f"RMS delay medio real: {np.mean(rms_values) * 1e9:.3f} ns")
+    # print(f"RMS delay std: {np.std(rms_values) * 1e9:.3f} ns")
+
     train()
