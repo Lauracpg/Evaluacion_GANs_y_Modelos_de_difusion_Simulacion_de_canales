@@ -12,11 +12,8 @@ import os
 class ConvBlock(nn.Module):
     """
     Bloque convolucional 1D básico usado en la U-Net.
-    Arquitectura:
-    Conv1D -> BatchNorm -> SiLU
-    Conv1D -> BatchNorm -> SiLU
-    Este bloque se encarga de extraer características locales
-    de la señal (patrones temporales del canal).
+    Extrae patrones locales de la señal (estructura temporal)
+    Mantiene la longitud usando padding=1
     """
     def __init__(self, in_c, out_c):
         super().__init__()
@@ -24,7 +21,7 @@ class ConvBlock(nn.Module):
         # kernel_size=3 y padding=1 preservan la longitud de la señal
         self.net = nn.Sequential(
             nn.Conv1d(in_c, out_c, 3, padding=1),
-            nn.GroupNorm(num_groups=8, num_channels=out_c),
+            nn.GroupNorm(num_groups=8, num_channels=out_c),  # normalización estable para batch pequeños
             nn.SiLU(),
             nn.Conv1d(out_c, out_c, 3, padding=1),
             nn.GroupNorm(num_groups=8, num_channels=out_c),
@@ -36,13 +33,8 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 class TimeEmbedding(nn.Module):
-    """
-    Embedding sinusoidal del timestep t.
-    Implementa la codificación temporal introducida en DDPM,
-    similar a la usada en Transformers.
-    El objetivo es convertir el timestep discreto t en un vector
-    continuo que indique al modelo "cuánto ruido" contiene la señal.
-    """
+    # Convierte el timestep t en un vector continuo
+    # Permite al modelo saber el nivel de ruido
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -56,7 +48,7 @@ class TimeEmbedding(nn.Module):
         # Frecuencias logarítmicamente espaciadas
         emb = math.log(10000) / (half - 1)
         emb = torch.exp(torch.arange(half, device=t.device) * -emb)
-        # Proyección sinusoidal
+        # embedding sinusoidal tipo Transformer
         emb = t.float()[:, None] * emb[None, :]
         emb = torch.cat([emb.sin(), emb.cos()], dim=1)
         # salida: (batch, dim)
@@ -95,21 +87,20 @@ class UNet1D(nn.Module):
     def forward(self, x, t):
         """
         x: señal ruidosa x_t -> (batch, 1, L)
-        t: timestep -> (batch,)
+        t: timestep / nivel de ruido -> (batch,)
         """
-        # Obtener embedding temporal y adaptarlo a 1D
-        t_emb = self.time_mlp(t).unsqueeze(-1)
         # Encoder
-        x1 = self.down1(x) # nivel 1
-        x2 = self.down2(self.pool(x1)) # nivel 2
+        x1 = self.down1(x) # características finas
+        x2 = self.down2(self.pool(x1)) # características más globales
         # Bottleneck
-        x_mid = self.mid(self.pool(x2))
+        x_mid = self.mid(self.pool(x2)) # representación central
         # expandir embeddings temporal a la dimensión temporal de x_mid
         t_emb = self.time_mlp(t).unsqueeze(-1)
         t_emb = t_emb.expand(-1, -1, x_mid.size(2))
         # Inyección del tiempo (condicionamiento temporal)
         x_mid = x_mid + t_emb
-        # Decoder
+
+        # Decoder: reconstrucción progresiva
         x = F.interpolate(x_mid, scale_factor=2)
         x = self.up1(torch.cat([x, x2], dim=1))
 
@@ -161,6 +152,8 @@ class DDPM(nn.Module):
         x_t = sqrt(alpha_bar_t) * x_0 +
             sqrt(1 - alpha_bar_t) * ε
         """
+        # Añade ruido a la señal original según el timestep t
+        # x_t = mezcla de señal limpia + ruido
         return (
             self.sqrt_alpha[t][:, None, None] * x0 +
             self.sqrt_one_minus[t][:, None, None] * noise
@@ -168,10 +161,10 @@ class DDPM(nn.Module):
 
     def loss(self, x0):
         """
-        Función de pérdida DDPM:
+        Función de pérdida:
         1. Elegir un timestep t aleatorio
-        2. Añadir ruido gaussiano
-        3. Predecir el ruido con al U-Net
+        2. Añadir ruido gaussiano a la señal
+        3. Predecir el ruido con la U-Net
         4. Minimizar MSE entre ruido y real
         """
         b = x0.size(0)
@@ -222,8 +215,9 @@ def train():
         loss_avg = 0.0
 
         for (x,) in loader:
+            # x = señal real
             x = x.to(device)
-            loss = ddpm.loss(x)
+            loss = ddpm.loss(x) # aprendizaje de denoising
 
             opt.zero_grad()
             loss.backward()

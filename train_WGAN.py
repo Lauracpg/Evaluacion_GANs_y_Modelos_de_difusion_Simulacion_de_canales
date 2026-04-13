@@ -71,6 +71,7 @@ def weights_init(m):
             nn.init.zeros_(m.bias)
 
 def gradient_penalty(critic, real, fake, device):
+    # Interpolación entre datos reales y falsos
     bsize = real.size(0)
     epsilon = torch.rand(bsize, 1, 1, device=device)
     epsilon = epsilon.expand_as(real)
@@ -78,8 +79,10 @@ def gradient_penalty(critic, real, fake, device):
     interpolated = epsilon * real + (1 - epsilon) * fake
     interpolated.requires_grad_(True)
 
+    # Salida del critic para datos interpolados
     d_interpolated = critic(interpolated)
 
+    # Cálculo del gradiente respecto a la entrada
     gradients = torch.autograd.grad(
         outputs=d_interpolated,
         inputs=interpolated,
@@ -88,6 +91,8 @@ def gradient_penalty(critic, real, fake, device):
         retain_graph=True,
         only_inputs=True
     )[0]
+
+    # Penalización: fuerza al gradiente a tener norma ≈ 1
     gradients = gradients.view(bsize, -1)
     gp = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
     return gp
@@ -100,8 +105,10 @@ def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
               patience=15, min_delta=1e-4,
               save_dir='checkpoints/WGAN_Conv1D'):
 
+    # El critic no clasifica, asigna una "energía" o score real-valued
+    # Objetivo: aproximar la distancia entre distribuciones (Wasserstein)
+
     os.makedirs(save_dir, exist_ok=True)
-    # optimizadores Adam para G y D
     optC = torch.optim.Adam(C.parameters(), lr=lr, betas=(0.0, 0.9))
     optG = torch.optim.Adam(G.parameters(), lr=lr, betas=(0.0, 0.9))
 
@@ -118,14 +125,21 @@ def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
             real = real_batch.to(device)
             bsize = real.size(0)
 
-            ### Entrenar Critic ###
+            # WGAN usa múltiples pasos del critic por cada paso del generador
+            # (el critic debe ser más fuerte para estimar bien la distancia)
+
+            ### TRAIN CRITIC ###
             for _ in range(n_critic):
                 z = torch.randn(bsize, z_dim, device=device)
                 fake = G(z).detach()
 
                 real_score = C(real).mean()
                 fake_score = C(fake).mean()
+
+                # Wasserstein loss: diferencia de expectativas
                 loss_C = -(real_score - fake_score)
+
+                # Gradient penalty para imponer restricción Lipschitz
                 gp = gradient_penalty(C, real, fake, device)
 
                 loss_total = loss_C + λ_gp * gp
@@ -138,11 +152,15 @@ def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
             with torch.no_grad():
                 z = torch.randn(bsize, z_dim, device=device)
                 fake_for_wdist = G(z)
+                # No es una loss de clasificación: es una estimación de la distancia entre distribuciones
                 w_dist_epoch += (C(real).mean() - C(fake_for_wdist).mean()).item()
 
-            ### Entrenar Generador ###
+            ### TRAIN GENERADOR ###
             z = torch.randn(bsize, z_dim, device=device)
             fake = G(z)
+
+            # El generador intenta aumentar el score del critic
+            # (hacer que el critic piense que son datos reales)
             loss_G = -C(fake).mean()
 
             optG.zero_grad()
