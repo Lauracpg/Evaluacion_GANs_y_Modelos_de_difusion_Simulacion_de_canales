@@ -1,0 +1,36 @@
+===== RESULTADOS EVALUACION =====
+Model type: ddim
+Checkpoint: checkpoints/datos_reales/ddim/best_model.pth
+Num eval samples: 500
+==================================================
+
+---- METRICAS GLOBALES ----
+pdp_mae: 0.002038
+pdp_mae_db: 4.390 dB
+avg_delay_mae_ns: 34.927 ns
+rms_mae_ns: 42.320 ns
+std_mae: 0.011497
+autocorr_mae: 0.040511
+psd_mae: 0.000938
+psd_mae_db: 1.209 dB/Hz
+
+---- STATISTICAL TESTS ----
+RMS t-test statistic: -9.364618
+RMS t-test p_value: 9.729e-20
+AVG delay t-test statistic: -5.718681
+AVG delay t-test p_value: 1.492e-08
+
+---- REAL CHANNEL STATS ----
+Avg delay real: 142.737 ns
+RMS delay real: 117.047 ns
+Mean PSD real: -32.763 dB/Hz
+
+---- GENERATED CHANNEL STATS ----
+Avg delay fake: 177.664 ns
+RMS delay fake: 159.366 ns
+Mean PSD fake: -33.032 dB/Hz
+
+
+---- STATISTICAL INTERPRETATION ----
+RMS comparison: STATISTICALLY DIFFERENT
+AVG delay comparison: STATISTICALLY DIFFERENT
