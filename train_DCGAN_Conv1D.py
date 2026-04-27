@@ -6,11 +6,19 @@ from torch import nn
 from torch.nn.utils import spectral_norm
 from torch.utils.data import TensorDataset, DataLoader
 
+from train_DDIM import load_config
+import json
+
+def load_config(path="gans_config.json"):
+    with open(path, "r") as f:
+        return json.load(f)
+
 # ----- GENERATOR Conv1D ----- #
 class Generator(nn.Module):
     def __init__(self, z_dim, L):
         super().__init__()
         self.init_len = L // 8
+        # Proyección del ruido a un espacio estructurado inicial
         self.fc = nn.Linear(z_dim, 128 * self.init_len)
         self.net = nn.Sequential(
             nn.BatchNorm1d(128),
@@ -46,13 +54,12 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2),
 
             spectral_norm(nn.Conv1d(32, 64, 4, 2, 1)),
-            #nn.BatchNorm1d(64),
             nn.LeakyReLU(0.2),
 
             spectral_norm(nn.Conv1d(64, 128, 4, 2, 1)),
-            #nn.BatchNorm1d(128),
             nn.LeakyReLU(0.2),
         )
+        # Capa final que convierte las características en un único valor
         self.fc = spectral_norm(nn.Linear(128 * (L // 8), 1))
 
     def forward(self, x):
@@ -67,24 +74,42 @@ def weights_init(m):
         if m.bias is not None:
             nn.init.zeros_(m.bias)
 
-def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
-              save_dir='checkpoints/DCGAN_Conv1D',patience=10,
-              min_delta=1e-4, z_dim=32):
+def train_gan(G, D, loader, device, config):
+    model_cfg = config["model"]
+    paths = config["paths"]
+    training = config["training"]
+    epochs = training["epochs"]
+    z_dim = model_cfg["z_dim"]
+    lr = training["lr"]
+    min_delta = training["min_delta"]
+    patience = training["patience"]
+    save_dir = paths["save_dir"]
+
     os.makedirs(save_dir, exist_ok=True)
-    # pérdida LSGAN
-    criterion = nn.MSELoss()
+
+    # Loss tipo regresión (en vez de clasificación)
+    # El discriminador aprende a dar valores cercanos a:
+    # 1 señal real
+    # 0 señal falsa
+    loss_type = config["loss"]["type"]
+    if loss_type == "bce":
+        criterion = nn.BCEWithLogitsLoss()
+    elif loss_type == "mse":
+        criterion = nn.MSELoss()
+    else:
+        raise ValueError(f"Tipo de pérdida desconocido: {loss_type}")
     # optimizadores Adam para G y D
     optD = torch.optim.Adam(D.parameters(), lr=lr, betas=(0.5, 0.999))
     optG = torch.optim.Adam(G.parameters(), lr=lr, betas=(0.5, 0.999))
+
+    best_g_loss = float('inf')
+    epochs_no_improve = 0
 
     ### Bucle del ENTRENAMIENTO principal ###
     # en cada iter:
     #   - entrenar primero discriminador (D)
     #   - luego el generador (G)
     #   - guardar las pérdidas promedio por época
-
-    best_g_loss = float('inf')
-    epochs_no_improve = 0
 
     for epoch in range(1, epochs + 1):
         g_loss_avg = 0.0
@@ -94,32 +119,47 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
             real = real_batch.to(device)
             bsize = real.size(0)
 
-            ### Entrenar Discriminador ###
+            ### 1) TRAIN DISCRIMINADOR ###
             optD.zero_grad()
-            # ruido leve en señales reales (ruido de medición)
-            real_noisy = real + 0.002 * torch.randn_like(real)
-            # etiquetas suavizadas
+
+            # Se añade un pequeño ruido a las señales reales
+            # para mejorar la robustez del discriminador
+            real_noisy = real + 0.001 * torch.randn_like(real)
+
+            # Etiquetas suavizadas (mejor estabilidad):
+            # reales → 0.9 en vez de 1
+            # falsas → 0.1 en vez de 0 CAMBIADO
             real_labels = torch.full((bsize, 1), 0.9, device=device)
-            fake_labels = torch.full((bsize, 1), 0.1, device=device)
-            # 1. Señales reales
+            fake_labels = torch.full((bsize, 1), 0.0, device=device)
+
+            # Señales reales
             pred_real = D(real_noisy)
             loss_real = criterion(pred_real, real_labels)
-            # 2. Señales falsas generadas
+
+            # Señales falsas (no actualiza G)
             z = torch.randn(bsize, z_dim, device=device)
             fake = G(z).detach()
 
             pred_fake = D(fake)
             loss_fake = criterion(pred_fake, fake_labels)
-            # 3. Pérdida total del discriminador (real=1, fake=0)
+
+            # El discriminador aprende a diferenciar real vs falso
             lossD = 0.5 * (loss_real + loss_fake)
             lossD.backward()
             optD.step()
 
-            ### Entrenar Generador ###
+            ### TRAIN GENERADOR ###
             optG.zero_grad()
+
+            # Genera nuevas señales desde ruido
             z = torch.randn(bsize, z_dim, device=device)
             fake = G(z)
+
+            # El generador quiere que el discriminador piense que
+            # estas señales son reales (0.9 ~ 1)
             pred_fake = D(fake)
+            real_labels = torch.full((bsize, 1), 0.9, device=device)
+
             lossG = criterion(pred_fake, real_labels)
             lossG.backward()
             optG.step()
@@ -162,43 +202,24 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
     print(f"Mejor G_loss: {best_g_loss:.4f}")
 
 if __name__ == "__main__":
-    ### Parámetros de ejecución ###
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='data/datos_sinteticos/dataset_synthetic.npy', help='Ruta del dataset .npy')
-    parser.add_argument('--epochs', type=int, default=200, help='Número de épocas de entrenamiento')
-    parser.add_argument('--batch_size', type=int, default=128, help='Tamaño del batch')
-    parser.add_argument('--z_dim', type=int, default=128, help='Dimensión del vector de ruido del generador')
-    parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
-    parser.add_argument('--save_dir', type=str, default='checkpoints/DCGAN_Conv1D',
-                        help='Carpeta donde guardar checkpoints')
-    parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
-    parser.add_argument('--patience', type=int, default=40, help='Paciencia para early stopping')
-    parser.add_argument('--min_delta', type=float, default=1e-5, help='Mejora mínima en G_loss')
-
-    args = parser.parse_args()
+    config = load_config()
 
     # dispositivo (GPU si está disponible)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    os.makedirs(args.save_dir, exist_ok=True)
+    os.makedirs(config["paths"]["save_dir"], exist_ok=True)
 
     ### Cargar dataset ###
-    data = np.load(args.data).astype(np.float32)
+    data = np.load(config["dataset"]["path"]).astype(np.float32)
 
     # convertir a tensores de PyTorch y crear un DataLoader
     dataset = TensorDataset(torch.from_numpy(data))
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
-    print(f"Dataset cargado: {len(dataset)} señales de longitud {args.L}")
+    loader = DataLoader(dataset, batch_size=config["training"]["batch_size"], shuffle=True, drop_last=True)
+    print(f"Dataset cargado: {len(dataset)} señales de longitud {config["model"]["signal_length"]}")
 
     # Crear instancias de ambos modelos
-    G = Generator(args.z_dim, args.L).to(device)
-    D = Discriminator(args.L).to(device)
+    G = Generator(config["model"]["z_dim"], config["model"]["signal_length"]).to(device)
+    D = Discriminator(config["model"]["signal_length"]).to(device)
     G.apply(weights_init)
     D.apply(weights_init)
 
-    train_gan(G,D, loader, device,
-              epochs = args.epochs,
-              lr=args.lr,
-              save_dir=args.save_dir,
-              patience=args.patience,
-              min_delta=args.min_delta,
-              z_dim=args.z_dim)
+    train_gan(G,D, loader, device, config)

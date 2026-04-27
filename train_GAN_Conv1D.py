@@ -5,6 +5,11 @@ import torch
 from torch import nn
 from torch.nn.utils import spectral_norm
 from torch.utils.data import TensorDataset, DataLoader
+import json
+
+def load_config(path="gans_config.json"):
+    with open(path, "r") as f:
+        return json.load(f)
 
 # ----- GENERATOR Conv1D ----- #
 class Generator(nn.Module):
@@ -14,16 +19,18 @@ class Generator(nn.Module):
         # Proyección del vector de ruido z a un espacio más grande
         self.fc = nn.Linear(z_dim, 128 * self.init_len)
         self.net = nn.Sequential(
+            nn.BatchNorm1d(128),
             nn.ReLU(True),
 
-            nn.ConvTranspose1d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose1d(128, 64, 4, 2, 1),
+            nn.BatchNorm1d(64),
             nn.ReLU(True),
 
-            nn.ConvTranspose1d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose1d(64, 32, 4, 2, 1),
+            nn.BatchNorm1d(32),
             nn.ReLU(True),
 
-            # Salida final: 2 canales (parte real e imaginaria del canal)
-            nn.ConvTranspose1d(32, 2, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose1d(32, 2, 4, 2, 1),
             nn.Tanh()
         )
     def forward(self, z):
@@ -37,34 +44,56 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self, L):
         super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv1d(2, 32, 4, 2, 1),
+        self.net = nn.Sequential(
+            spectral_norm(nn.Conv1d(2, 32, 4, 2, 1)),
             nn.LeakyReLU(0.2),
 
-            nn.Conv1d(32, 64, 4, 2, 1),
+            spectral_norm(nn.Conv1d(32, 64, 4, 2, 1)),
             nn.LeakyReLU(0.2),
 
-            nn.Conv1d(64, 128, 4, 2, 1),
+            spectral_norm(nn.Conv1d(64, 128, 4, 2, 1)),
             nn.LeakyReLU(0.2),
         )
         # Capa final: clasificación binaria (real vs falso)
-        self.fc = nn.Linear(128 * (L // 8), 1)
+        self.fc = spectral_norm(nn.Linear(128 * (L // 8), 1))
 
     def forward(self, x):
         # x: señal real o generada
-        f = self.conv(x)
+        f = self.net(x)
         f = f.view(x.size(0), -1)
         return self.fc(f)
 
-def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
-              save_dir='checkpoints/DCGAN_Conv1D', z_dim=32):
+def weights_init(m):
+    if isinstance(m, (nn.Conv1d, nn.ConvTranspose1d, nn.Linear)):
+        nn.init.normal_(m.weight, 0.0, 0.02)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
 
-    os.makedirs(save_dir, exist_ok=True)
+def train_gan(G, D, loader, device, config):
+    training = config["training"]
+    model_cfg = config["model"]
+    paths = config["paths"]
+
+    os.makedirs(paths["save_dir"], exist_ok=True)
+
+    epochs = training["epochs"]
+    lr = training["lr"]
+    z_dim = model_cfg["z_dim"]
+
+    betas = training["optimizer_betas_gan"]
+
     # Función de pérdida binaria (real vs falso)
-    criterion = nn.BCEWithLogitsLoss()
+    loss_type = config["loss"]["type"]
+    if loss_type == "bce":
+        criterion = nn.BCEWithLogitsLoss()
+    elif loss_type == "mse":
+        criterion = nn.MSELoss()
+    else:
+        raise ValueError(f"Tipo de pérdida desconocido: {loss_type}")
+
     # Optimizadores independientes para G y D
-    optD = torch.optim.Adam(D.parameters(), lr=lr)
-    optG = torch.optim.Adam(G.parameters(), lr=lr)
+    optD = torch.optim.Adam(D.parameters(), lr=lr, betas=betas)
+    optG = torch.optim.Adam(G.parameters(), lr=lr, betas=betas)
 
     # Mejor pérdida del generador (para guardar mejor modelo)
     best_g_loss = float("inf")
@@ -76,6 +105,7 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
     for epoch in range(epochs):
         g_loss_epoch = 0.0
         d_loss_epoch = 0.0
+
         for (real_batch,) in loader:
             real = real_batch.to(device)
             bsize = real.size(0)
@@ -92,15 +122,15 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
             pred_fake = D(fake) # debe clasificar como 0
 
             # Etiquetas reales y falsas
-            real_labels = torch.ones(bsize, 1, device=device)
-            fake_labels = torch.zeros(bsize, 1, device=device)
+            real_labels = torch.full((bsize, 1), 0.9, device=device)
+            fake_labels = torch.zeros((bsize, 1), device=device)
 
             # Pérdida del discriminador:
             # - aprender a distinguir real vs falso
             loss_real = criterion(pred_real, real_labels)
             loss_fake = criterion(pred_fake, fake_labels)
 
-            lossD = loss_real + loss_fake
+            lossD = 0.5 * (loss_real + loss_fake)
             lossD.backward()
             optD.step()
 
@@ -123,55 +153,57 @@ def train_gan(G, D, loader, device, epochs=100, lr=2e-4,
             g_loss_epoch += lossG.item()
             d_loss_epoch += lossD.item()
 
-        print(f"Epoch {epoch+1}/{epochs} | G: {g_loss_epoch:.4f} | D: {d_loss_epoch:.4f}")
+        g_loss_epoch /= len(loader)
+        d_loss_epoch /= len(loader)
 
+        print(
+            f"Epoch [{epoch}/{epochs}] "
+            f"G_loss: {g_loss_epoch:.4f} | D_loss: {d_loss_epoch:.4f}"
+        )
         # Guardar mejor modelo (según pérdida del generador)
         if g_loss_epoch < best_g_loss:
             best_g_loss = g_loss_epoch
 
-            torch.save({
-                "G": G.state_dict(),
-                "D": D.state_dict(),
-                "epoch": epoch,
-                "g_loss": g_loss_epoch,
-                "d_loss": d_loss_epoch
-            }, os.path.join(save_dir, "best_model.pth"))
+            torch.save(
+                {
+                    "G": G.state_dict(),
+                    "D": D.state_dict(),
+                    "epoch": epoch,
+                    "g_loss": best_g_loss,
+                },
+                os.path.join(paths["save_dir"], paths["best_model"]),
+            )
 
-            print(f"Nuevo mejor modelo guardado (epoch {epoch + 1})")
+            print(f"Nuevo mejor modelo en {epoch}")
 
-    print("Entrenamiento completado. Modelos guardados en", save_dir)
+    print("Entrenamiento completado. Modelos guardados en", paths["save_dir"])
 
 if __name__ == "__main__":
-    ### Parámetros de ejecución ###
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='data/datos_sinteticos/dataset_synthetic.npy', help='Ruta del dataset .npy')
-    parser.add_argument('--epochs', type=int, default=100, help='Número de épocas de entrenamiento')
-    parser.add_argument('--batch_size', type=int, default=32, help='Tamaño del batch')
-    parser.add_argument('--z_dim', type=int, default=32, help='Dimensión del vector de ruido del generador')
-    parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (tasa de aprendizaje)')
-    parser.add_argument('--save_dir', type=str, default='checkpoints/GAN_Conv1D',
-                        help='Carpeta donde guardar checkpoints')
-    parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
-    args = parser.parse_args()
+    config = load_config()
+
+    torch.manual_seed(config["experiment"]["seed"])
 
     # dispositivo (GPU si está disponible)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    os.makedirs(args.save_dir, exist_ok=True)
+    os.makedirs(config["paths"]["save_dir"], exist_ok=True)
 
     ### Cargar dataset ###
-    data = np.load(args.data).astype(np.float32)
+    data = np.load(config["dataset"]["path"]).astype(np.float32)
 
     # convertir a tensores de PyTorch y crear un DataLoader
     dataset = TensorDataset(torch.from_numpy(data))
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
-    print(f"Dataset cargado: {len(dataset)} señales de longitud {args.L}")
+    loader = DataLoader(
+        dataset,
+        batch_size=config["training"]["batch_size"],
+        shuffle=True,
+        drop_last=True
+    )
 
     # Crear instancias de ambos modelos
-    G = Generator(args.z_dim, args.L).to(device)
-    D = Discriminator(args.L).to(device)
+    G = Generator(config["model"]["z_dim"], config["model"]["signal_length"]).to(device)
+    D = Discriminator(config["model"]["signal_length"]).to(device)
 
-    train_gan(G,D, loader, device,
-              epochs = args.epochs,
-              lr=args.lr,
-              save_dir=args.save_dir,
-              z_dim=args.z_dim)
+    G.apply(weights_init)
+    D.apply(weights_init)
+
+    train_gan(G, D, loader, device, config)
