@@ -1,0 +1,43 @@
+{
+  "experiment": {
+    "name": "loopback_diffusion",
+    "seed": 42,
+    "model_type": "ddpm"
+  },
+
+  "dataset": {
+    "path": "data/datos_loopback/new_ch_time_worst.npy",
+    "type": "loopback"
+  },
+
+  "model": {
+    "channels": 2,
+    "time_emb_dim": 64
+  },
+
+  "diffusion": {
+    "T": 1000,
+    "schedule": "cosine"
+  },
+
+  "training": {
+    "epochs": 500,
+    "batch_size": 64,
+    "lr": 0.0002,
+    "patience": 80,
+    "min_delta": 0.000005,
+    "num_workers": 0,
+    "grad_clip": 1.0
+  },
+
+  "sampling": {
+    "steps": 100,
+    "eta": 0.0
+  },
+
+  "paths": {
+    "save_dir": "checkpoints/datos_loopback/ddpm",
+    "best_model": "best_model.pth",
+    "log_dir": "logs"
+  }
+}

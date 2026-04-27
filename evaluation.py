@@ -6,11 +6,17 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 from scipy.stats import ttest_ind
 
-from train_DDIM import Diffusion, DDIMSampler, UNet1D
-#from train_DDPM import UNet1D, DDPM
+#from train_DDIM import Diffusion, DDIMSampler, UNet1D
+from train_DDPM import UNet1D, DDPM
 #from train_GAN_Conv1D import Generator
 #from train_DCGAN_Conv1D import Generator
 from train_WGAN import Generator
+
+import json
+
+def load_config(path="evaluation_config.json"):
+    with open(path, "r") as f:
+        return json.load(f)
 
 def to_db(x, eps=1e-10):
     return 10 * np.log10(np.maximum(x, eps))
@@ -158,8 +164,8 @@ def evaluate_metrics(real, fake, delta_tau=1.0):
     return metrics
 
 
-def generate_signals(model_type, model_checkpoint, num_samples,
-                     device, z_dim=32, L=128, ddpm_steps=1000):
+def generate_signals(config, model_type, model_checkpoint, num_samples,
+                     device):
     """
     Genera señales sintéticas de canal utilizando un modelo ya entrenado,
     sin alterar los pesos ni la distribución aprendida.
@@ -167,8 +173,22 @@ def generate_signals(model_type, model_checkpoint, num_samples,
     Return:
     array (num_samples, L) con las señales generadas (normalizadas en [-1,1]).
     """
+    L = config["experiment"]["signal_length"]
+    z_dim = config["models"][model_type].get("z_dim", None)
+    ddpm_steps = config["models"][model_type].get("T", 1000)
+
+    if model_type == 'gan':
+        checkpoint = torch.load(model_checkpoint, map_location=device)
+        G = Generator(z_dim=z_dim, L=L).to(device)
+        G.load_state_dict(checkpoint["G"])
+        G.eval()
+
+        with torch.no_grad():
+            z = torch.randn(num_samples, z_dim, device=device)
+            fake = G(z).cpu().numpy()
+
     # DCGAN: Generación directa a partir de ruido latente z
-    if model_type == 'dcgan':
+    elif model_type == 'dcgan':
         # cargar checkpoint y reconstruir el generador
         checkpoint = torch.load(model_checkpoint, map_location=device)
         G = Generator(z_dim=z_dim, L=L).to(device)
@@ -195,7 +215,7 @@ def generate_signals(model_type, model_checkpoint, num_samples,
     elif model_type == 'ddpm':
         # cargar U-Net entrenada
         checkpoint = torch.load(model_checkpoint, map_location=device)
-        unet = UNet1D(L=L).to(device)
+        unet = UNet1D().to(device)
         unet.load_state_dict(checkpoint)
 
         # reconstruir DDPM con el mismo número de pasos T
@@ -211,8 +231,8 @@ def generate_signals(model_type, model_checkpoint, num_samples,
             for t in reversed(range(ddpm.T)):
                 t_batch = torch.full((num_samples,), t, device=device, dtype=torch.long)
                 noise_pred = ddpm.model(x, t_batch)
-                beta = ddpm.betas[t]
 
+                beta = ddpm.betas[t]
                 if t > 0:
                     z = torch.randn_like(x)
                 else:
@@ -230,9 +250,9 @@ def generate_signals(model_type, model_checkpoint, num_samples,
             # x0 = x0 / (energy + 1e-12)
             x0 = torch.clamp(x0, -1, 1)
             fake = x0.cpu().numpy()
+
     elif model_type == 'ddim':
         checkpoint = torch.load(model_checkpoint, map_location=device)
-
         unet = UNet1D().to(device)
         unet.load_state_dict(checkpoint)
         unet.eval()
@@ -241,31 +261,37 @@ def generate_signals(model_type, model_checkpoint, num_samples,
         sampler = DDIMSampler(diffusion, eta=0.0)  # determinista
 
         with torch.no_grad():
-            fake = sampler.sample(
-                shape=(num_samples, 2, L),
+            return sampler.sample(
+                shape=(num_samples, 2, config["model"]["ddim"]["L"]),
                 device=device,
-                steps=100   # menos pasos que DDPM
+                steps=config["model"]["ddim"]["steps"]
             ).cpu().numpy()
     else:
-        raise ValueError('Invalid model type, debe ser "dcgan" o "ddpm"')
+        raise ValueError('Invalid model type')
 
     return fake
 
 # MAIN
 def main(args):
-    print("\n=== Cargando datos reales ===")
     np.random.seed(42)
     torch.manual_seed(42)
+    print("\n=== Cargando datos ===")
     data = np.load(args.data).astype(np.float32)
     idx = np.random.choice(len(data), args.num_eval, replace=False)
     real_eval = data[idx]
     print("Dataset cargado:", data.shape)
 
     print(f"\n=== Generando señales con {args.model_type.upper()} ===")
+    config = load_config()
+
     fake_eval = generate_signals(
-        args.model_type, args.model, args.num_eval, args.device,
-        z_dim=args.z_dim, L=args.L, ddpm_steps=args.ddpm_steps
+        config=config,
+        model_type=args.model_type,
+        model_checkpoint=args.model,
+        num_samples=args.num_eval,
+        device=args.device
     )
+
     print("Señales generadas:", fake_eval.shape)
 
     real_eval_complex = real_eval[:, 0, :] + 1j * real_eval[:, 1, :]
@@ -428,20 +454,23 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=str, default="data/datos_sinteticos/dataset_synthetic.npy")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--model_type", type=str, choices=['dcgan', 'wgan', 'ddpm', 'ddim'], default='dcgan')
-    parser.add_argument("--save_dir", type=str, default="eval_results")
-    parser.add_argument("--z_dim", type=int, default=64)
-    parser.add_argument("--L", type=int, default=128)
-    parser.add_argument("--num_eval", type=int, default=500)
+    parser.add_argument("--model_type", type=str, choices=['gan', 'dcgan', 'wgan', 'ddpm', 'ddim'], default='dcgan')
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--ddpm_steps", type=int, default=1000)
-    parser.add_argument("--delta_tau", type=float, default=1e-8)
     args = parser.parse_args()
 
-    base_save_dir = "eval_results"
-    if args.model_type == "dcgan":
+    config = load_config()
+
+    args.data = config["data"]["path"]
+    args.num_eval = config["evaluation"]["num_samples"]
+    args.delta_tau = config["evaluation"]["delta_tau"]
+
+    base_save_dir = config["paths"]["eval"]["base_dir"]
+
+    if args.model_type == "gan":
+        args.save_dir = os.path.join(base_save_dir, "GAN_Conv1D")
+
+    elif args.model_type == "dcgan":
         args.save_dir = os.path.join(base_save_dir, "DCGAN_Conv1D")
 
     elif args.model_type == "wgan":

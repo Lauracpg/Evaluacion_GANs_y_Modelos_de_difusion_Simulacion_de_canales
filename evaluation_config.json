@@ -1,0 +1,108 @@
+{
+  "experiment": {
+    "seed": 42,
+    "dataset": "loopback",
+    "signal_length": 200,
+    "channels": 2
+  },
+
+  "data": {
+    "path": "data/datos_loopback/new_ch_time_worst.npy"
+  },
+
+  "models": {
+    "gan": {
+      "z_dim": 64,
+      "generator": {
+        "base_channels": 128
+      },
+      "discriminator": {
+        "base_channels": 32
+      }
+    },
+
+    "dcgan": {
+      "z_dim": 64,
+      "generator": {
+        "base_channels": 128
+      },
+      "discriminator": {
+        "spectral_norm": true,
+        "base_channels": 32
+      }
+    },
+
+    "wgan": {
+      "z_dim": 64,
+      "critic": {
+        "base_channels": 32,
+        "gradient_penalty": 10.0
+      }
+    },
+
+    "ddpm": {
+      "T": 1000,
+      "unet": {
+        "base_channels": 64
+      }
+    },
+
+    "ddim": {
+      "T": 1000,
+      "sampling_steps": 100,
+      "eta": 0.0,
+      "unet": {
+        "base_channels": 64
+      }
+    }
+  },
+
+  "training": {
+    "epochs": 500,
+    "batch_size": 64,
+    "lr": 0.0002,
+
+    "gan": {
+      "optimizer_betas": [0.5, 0.999]
+    },
+
+    "wgan": {
+      "optimizer_betas": [0.0, 0.9],
+      "n_critic": 5,
+      "lambda_gp": 10.0
+    },
+
+    "early_stopping": {
+      "patience": 80,
+      "min_delta": 0.000005
+    }
+  },
+
+  "evaluation": {
+    "num_samples": 500,
+    "delta_tau": 1e-8,
+
+    "metrics": {
+      "pdp": true,
+      "psd": true,
+      "delay": true,
+      "autocorr": true,
+      "histogram": true,
+      "ttest": true
+    }
+  },
+
+  "paths": {
+    "checkpoints": {
+      "gan": "checkpoints/datos_reales/GAN_Conv1D",
+      "dcgan": "checkpoints/datos_reales/DCGAN_Conv1D",
+      "wgan": "checkpoints/datos_loopback/WGAN_GP_Conv1D",
+      "ddpm": "checkpoints/datos_loopback/ddpm",
+      "ddim": "checkpoints/datos_loopback/DDIM_Conv1D"
+    },
+
+    "eval": {
+      "base_dir": "eval_results/datos_loopback"
+    }
+  }
+}

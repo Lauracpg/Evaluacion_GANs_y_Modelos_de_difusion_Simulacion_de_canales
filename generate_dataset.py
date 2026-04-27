@@ -3,6 +3,52 @@ import os
 import h5py
 from matplotlib import pyplot as plt
 
+def load_loopback_data(mat_path, L=200, save_path="data/dataset_loopback.npy"):
+    print(f"Cargando archivo: {mat_path} ...")
+
+    f = h5py.File(mat_path, "r")
+
+    H_struct = f["est_RX_t"][...]
+
+    print("Shape original:", H_struct.shape)
+    print("dtype:", H_struct.dtype)
+
+    H_real = np.nan_to_num(H_struct["real"], nan=0.0)
+    H_imag = np.nan_to_num(H_struct["imag"], nan=0.0)
+
+    H = H_real + 1j * H_imag
+
+    print("Shape complejo:", H.shape)
+
+    H = H[:, :L]
+    print(f"Shape tras recorte a L={L}:", H.shape)
+
+    H_real = np.real(H)
+    H_imag = np.imag(H)
+
+    energy = np.sqrt(np.sum(H_real**2 + H_imag**2, axis=1, keepdims=True))
+
+    H_real = H_real / (energy + 1e-12)
+    H_imag = H_imag / (energy + 1e-12)
+
+    dataset = np.stack([H_real, H_imag], axis=1).astype(np.float32)
+
+    print("Shape dataset final:", dataset.shape)
+
+    max_abs = np.max(np.abs(dataset))
+    dataset = dataset / (max_abs + 1e-12)
+
+    print("Rango final:", dataset.min(), dataset.max())
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    np.save(save_path, dataset)
+
+    print("Dataset guardado en:", save_path)
+
+    return dataset
+
+
 def load_synthetic_data(file_path, L=128, save_path="data/datos_sinteticos/TDL_D_85ns_fd50000_SNR20_h_real.npy"):
     print(f"Cargando archivo: {file_path}")
     H = np.load(file_path) # (128, 100000)
@@ -38,7 +84,7 @@ def load_synthetic_data(file_path, L=128, save_path="data/datos_sinteticos/TDL_D
 
     return dataset
 
-def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
+def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.npy"):
     print(f"Cargando archivo {mat_path} ...")
     f = h5py.File(mat_path, "r")
 
@@ -130,7 +176,7 @@ def load_nist_data(mat_path, L=128, save_path="data/dataset_nist.npy"):
     print(f"\nDataset guardado en: {save_path}")
     return dataset
 
-def analyze_dataset(data, save_dir="data", num_examples=5, heatmap_channels=100):
+def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heatmap_channels=100):
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
@@ -257,13 +303,19 @@ def analyze_dataset(data, save_dir="data", num_examples=5, heatmap_channels=100)
     print("\nAnálisis completado.")
 
 if __name__ == "__main__":
-    #data = load_nist_data("data/NIST_Samples.mat", L=128, save_path="data/dataset_nist.npy")
-    #print("Shape:", data.shape)
+    # data = load_nist_data("data/datos_reales/NIST_Samples.mat", L=128, save_path="data/datos_reales/dataset_nist.npy")
+    # print("Shape:", data.shape)
 
     data = load_synthetic_data(
         "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
         L=128,
         save_path="data/datos_sinteticos/dataset_synthetic.npy"
     )
+
+    # dataset = load_loopback_data(
+    #     "data/datos_loopback/new_ch_time_worst.mat",
+    #     L=200,
+    #     save_path="data/datos_loopback/new_ch_time_worst.npy"
+    # )
 
     analyze_dataset(data)
