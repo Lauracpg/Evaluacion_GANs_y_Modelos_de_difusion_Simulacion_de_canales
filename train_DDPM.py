@@ -1,14 +1,18 @@
+import json
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
 from torch.utils.data import DataLoader, TensorDataset
-import argparse
 import os
 
-# Denoising diffusion probabilistic model DDPM
+def load_config(path="dm_config.json"):
+    with open(path, "r") as f:
+        return json.load(f)
 
+# Denoising diffusion probabilistic model DDPM
 class ConvBlock(nn.Module):
     """
     Bloque convolucional 1D básico usado en la U-Net.
@@ -21,10 +25,10 @@ class ConvBlock(nn.Module):
         # kernel_size=3 y padding=1 preservan la longitud de la señal
         self.net = nn.Sequential(
             nn.Conv1d(in_c, out_c, 3, padding=1),
-            nn.GroupNorm(num_groups=8, num_channels=out_c),  # normalización estable para batch pequeños
+            nn.GroupNorm(min(8, out_c), num_channels=out_c),  # normalización estable para batch pequeños
             nn.SiLU(),
             nn.Conv1d(out_c, out_c, 3, padding=1),
-            nn.GroupNorm(num_groups=8, num_channels=out_c),
+            nn.GroupNorm(min(8, out_c), num_channels=out_c),
             nn.SiLU()
         )
 
@@ -61,28 +65,28 @@ class UNet1D(nn.Module):
     El modelo aprende a predecir el ruido ε añadido a la señal
     en un determinado timestep t.
     """
-    def __init__(self, L=128):
+    def __init__(self, time_emb_dim=64):
         super().__init__()
         # MLP que transforma el timestep t en un embedding
         self.time_mlp = nn.Sequential(
-            TimeEmbedding(64),
-            nn.Linear(64, 128),
+            TimeEmbedding(time_emb_dim),
+            nn.Linear(time_emb_dim, 256),
             nn.SiLU()
         )
         # Encoder (downsampling)
         # extrae características a distintas escalas temporales
-        self.down1 = ConvBlock(2, 32)
-        self.down2 = ConvBlock(32, 64)
+        self.down1 = ConvBlock(2, 64)
+        self.down2 = ConvBlock(64, 128)
         self.pool = nn.MaxPool1d(2)
         # Bottleneck
         # parte central donde se inyecta la información temporal
-        self.mid = ConvBlock(64, 128)
+        self.mid = ConvBlock(128, 256)
         # Decoder (unsampling)
         # reconstruye la señal combinando información fina y gruesa
-        self.up1 = ConvBlock(128 + 64, 64)
-        self.up2 = ConvBlock(64 + 32, 32)
+        self.up1 = ConvBlock(256 + 128, 128)
+        self.up2 = ConvBlock(128 + 64, 64)
         # Capa final: predicción del ruido (misma dimensión que la señal)
-        self.final = nn.Conv1d(32, 2, 1)
+        self.final = nn.Conv1d(64, 2, 1)
 
     def forward(self, x, t):
         """
@@ -101,10 +105,10 @@ class UNet1D(nn.Module):
         x_mid = x_mid + t_emb
 
         # Decoder: reconstrucción progresiva
-        x = F.interpolate(x_mid, scale_factor=2)
+        x = F.interpolate(x_mid, size=x2.shape[-1])
         x = self.up1(torch.cat([x, x2], dim=1))
 
-        x = F.interpolate(x, scale_factor=2)
+        x = F.interpolate(x, size=x1.shape[-1])
         x = self.up2(torch.cat([x, x1], dim=1))
         # predicción final del ruido ε
         return self.final(x)
@@ -183,35 +187,29 @@ def train():
     """
     Bucle principal de entrenamiento del DDPM.
     """
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--save_dir', type=str, default='checkpoints/ddpm')
-    parser.add_argument('--patience', type=int, default=10)
-    args = parser.parse_args()
-
+    config = load_config()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    os.makedirs(args.save_dir, exist_ok=True)
+    os.makedirs(config["paths"]["save_dir"], exist_ok=True)
     # cargar dataset
-    data = np.load('data/datos_sinteticos/dataset_synthetic.npy')
-    data = torch.from_numpy(data).float()
+    data_np = np.load(config["dataset"]["path"])
+    data = torch.from_numpy(data_np).float()
 
     loader = DataLoader(
         TensorDataset(data),
-        batch_size=args.batch_size,
-        shuffle=True
+        batch_size=config["training"]["batch_size"],
+        shuffle=True,
+        num_workers=config["training"]["num_workers"]
     )
 
-    model = UNet1D().to(device)
-    ddpm = DDPM(model).to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    model = UNet1D(time_emb_dim=config["model"]["time_emb_dim"]).to(device)
+    ddpm = DDPM(model, T=config["diffusion"]["T"]).to(device)
+
+    opt = torch.optim.Adam(model.parameters(), lr=config["training"]["lr"])
 
     best_loss = float('inf')
     epochs_no_improve = 0
-    min_delta = 1e-4
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(1, config["training"]["epochs"] + 1):
         loss_avg = 0.0
 
         for (x,) in loader:
@@ -221,6 +219,7 @@ def train():
 
             opt.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config["training"]["grad_clip"])
             opt.step()
 
             loss_avg += loss.item()
@@ -228,23 +227,25 @@ def train():
         loss_avg /= len(loader)
         print(f"Epoch {epoch} | Loss {loss_avg:.6f}")
 
-        if loss_avg < best_loss - min_delta:
+        if loss_avg < best_loss - config["training"]["min_delta"]:
             best_loss = loss_avg
             epochs_no_improve = 0
+
             torch.save(model.state_dict(),
-                       os.path.join(args.save_dir, "best_model.pth"))
+                os.path.join(config["paths"]["save_dir"], config["paths"]["best_model"]))
+
             print(f"Mejor modelo guardado (loss={best_loss:.6f})")
         else:
             epochs_no_improve += 1
             print(f"Sin mejora durante {epochs_no_improve} epochs")
 
-        if epochs_no_improve >= args.patience:
-            print(f"Early stopping: no ha habido mejora en {args.patience} epochs")
+        if epochs_no_improve >= config["training"]["patience"]:
+            print(f"Early stopping")
             break
 
         if epoch % 20 == 0:
             torch.save(model.state_dict(),
-                       os.path.join(args.save_dir, f'model_e{epoch}.pth'))
+                       os.path.join(config["paths"]["save_dir"], f'model_e{epoch}.pth'))
 
 if __name__ == "__main__":
     train()

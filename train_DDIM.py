@@ -6,6 +6,11 @@ import math
 from torch.utils.data import DataLoader, TensorDataset
 import argparse
 import os
+import json
+
+def load_config(path="dm_config.json"):
+    with open(path, "r") as f:
+        return json.load(f)
 
 # Denoising diffusion implicit model DDIM
 
@@ -54,13 +59,13 @@ class TimeEmbedding(nn.Module):
 # entrada: señal ruidosa xt
 # salida: ruido estimado epsilon
 class UNet1D(nn.Module):
-    def __init__(self):
+    def __init__(self, time_emb_dim=64):
         super().__init__()
 
         # embedding del tiempo
         self.time_mlp = nn.Sequential(
-            TimeEmbedding(64),
-            nn.Linear(64, 256),
+            TimeEmbedding(time_emb_dim),
+            nn.Linear(time_emb_dim, 256),
             nn.SiLU()
         )
 
@@ -96,10 +101,10 @@ class UNet1D(nn.Module):
         x_mid = x_mid + t_emb
 
         # decoder
-        x = F.interpolate(x_mid, scale_factor=2)
+        x = F.interpolate(x_mid, size=x2.shape[-1])
         x = self.up1(torch.cat([x, x2], dim=1))
 
-        x = F.interpolate(x, scale_factor=2)
+        x = F.interpolate(x, size=x1.shape[-1])
         x = self.up2(torch.cat([x, x1], dim=1))
 
         return self.final(x)
@@ -120,6 +125,26 @@ def cosine_beta_schedule(T):
     betas = 1 - (alphas[1:] / alphas[:-1])
     return torch.clip(betas, 0.0001, 0.999)
 
+def compute_rms_torch(x, delta_tau=1e-8):
+    # x: (B, 2, L)
+    real = x[:, 0, :]
+    imag = x[:, 1, :]
+    mag = torch.sqrt(real**2 + imag**2)
+
+    power = mag**2 # (B, L)
+
+    L =  power.size(1)
+    delays = torch.arange(L, device=x.device).float() * delta_tau
+
+    total_power = power.sum(dim=1, keepdim=True) + 1e-12
+    mean_delay = (power * delays).sum(dim=1, keepdim=True) / total_power
+
+    rms = torch.sqrt(
+        (power * (delays - mean_delay) ** 2).sum(dim=1) / total_power.squeeze()
+    )
+
+    return rms
+
 # implementa el proceso forward: q(xt | x0)
 # añade ruido progresivamente a la señal
 class Diffusion(nn.Module):
@@ -132,7 +157,6 @@ class Diffusion(nn.Module):
 
         betas = cosine_beta_schedule(T)
         alphas = 1. - betas
-
         # producto acumulado
         alpha_bar = torch.cumprod(alphas, dim=0)
 
@@ -144,16 +168,15 @@ class Diffusion(nn.Module):
         self.register_buffer('sqrt_alpha_bar', torch.sqrt(alpha_bar))
         self.register_buffer('sqrt_one_minus', torch.sqrt(1 - alpha_bar))
 
-        if data is not None:
-            mag = np.abs(data[:, 0, :] + 1j * data[:, 1, :])
-            pdp = np.mean(mag ** 2, axis=0)  # (L,)
-            pdp_norm = pdp / (pdp.max() + 1e-12)
+        if data is None:
+            raise ValueError("data must be provided to compute tap_weights")
 
-            # peso = 1 + escala * pdp normalizado
-            tap_weights = 1.0 + 9.0 * pdp_norm  # rango [1, 10]
-            tap_weights = torch.tensor(tap_weights, dtype=torch.float32)
-        else:
-            tap_weights = torch.ones(128)
+        mag = np.abs(data[:, 0, :] + 1j * data[:, 1, :])
+        pdp = np.mean(mag ** 2, axis=0)  # (L,)
+        pdp_norm = pdp / (pdp.max() + 1e-12)
+
+        tap_weights = 1.0 + 9.0 * pdp_norm
+        tap_weights = torch.tensor(tap_weights, dtype=torch.float32)
 
         self.register_buffer('tap_weights', tap_weights)
 
@@ -174,7 +197,6 @@ class Diffusion(nn.Module):
 
         # elegir paso aleatorio
         t = torch.randint(0, self.T, (b,), device=x0.device)
-
         # ruido gaussiano
         noise = torch.randn_like(x0)
 
@@ -186,7 +208,21 @@ class Diffusion(nn.Module):
 
         # pesos con forma (1, 1, L) para broadcasting
         weights = self.tap_weights.view(1, 1, -1)
-        return (weights * (noise_pred - noise) ** 2).mean()
+        loss_noise = (weights * (noise_pred - noise) ** 2).mean()
+
+        a_t = self.alpha_bar[t][:, None, None]
+
+        x0_pred = (xt - torch.sqrt(1 - a_t) * noise_pred) / torch.sqrt(a_t + 1e-8)
+        #x0_pred = torch.clamp(x0_pred, -1, 1)
+
+        rms_real = compute_rms_torch(x0)
+        rms_pred = compute_rms_torch(x0_pred)
+
+        loss_rms = torch.mean((rms_real - rms_pred) ** 2)
+
+        lambda_rms = 1.0  # hiperparámetro
+
+        return loss_noise + lambda_rms * loss_rms
 
 # genera nuevas señales a partir de ruido puro
 # DDIm permite usar menos pasos
@@ -250,36 +286,39 @@ class DDIMSampler:
         return torch.clamp(x0_final, -1, 1)
 
 def train():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=500)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--save_dir', type=str, default='checkpoints/ddim')
-    parser.add_argument('--patience', type=int, default=20)
-    parser.add_argument('--min_delta', type=float, default=1e-4)
-    args = parser.parse_args()
+    config = load_config()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    os.makedirs(args.save_dir, exist_ok=True)
+    os.makedirs(config["paths"]["save_dir"], exist_ok=True)
 
-    data_np = np.load('data/datos_sinteticos/dataset_synthetic.npy')
+    data_np = np.load(config["dataset"]["path"])
     data = torch.from_numpy(data_np).float()
 
     loader = DataLoader(
         TensorDataset(data),
-        batch_size=args.batch_size,
-        shuffle=True
+        batch_size=config["training"]["batch_size"],
+        shuffle=True,
+        num_workers=config["training"]["num_workers"]
     )
 
-    model = UNet1D().to(device)
-    diffusion = Diffusion(model, data=data_np).to(device)
+    model = UNet1D(time_emb_dim=config["model"]["time_emb_dim"]).to(device)
 
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
+    diffusion = Diffusion(
+        model,
+        T=config["diffusion"]["T"],
+        data=data_np
+    ).to(device)
+
+    opt = torch.optim.Adam(
+        model.parameters(),
+        lr=config["training"]["lr"]
+    )
+
     best_loss = float('inf')
     epochs_no_improve = 0
-    for epoch in range(args.epochs):
-        loss_avg = 0
+
+    for epoch in range(config["training"]["epochs"]):
+        loss_avg = 0.0
 
         for (x,) in loader:
             x = x.to(device)
@@ -290,56 +329,39 @@ def train():
             loss.backward()
 
             # evita el nan por exploding gradient
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                config["training"]["grad_clip"]
+            )
 
             opt.step()
             loss_avg += loss.item()
 
         loss_avg /= len(loader)
-        scheduler.step()
 
         print(f"Epoch {epoch} | Loss {loss_avg:.6f}")
 
-        if loss_avg < best_loss:
+        if loss_avg < best_loss - config["training"]["min_delta"]:
             best_loss = loss_avg
             epochs_no_improve = 0
-            torch.save(model.state_dict(),
-                       os.path.join(args.save_dir, "best_model.pth"))
-            print(f"Nuevo mejor modelo guardado (loss={best_loss:.6f})")
+
+            torch.save(
+                model.state_dict(),
+                os.path.join(
+                    config["paths"]["save_dir"],
+                    config["paths"]["best_model"]
+                )
+            )
         else:
             epochs_no_improve += 1
-            print(f"Sin mejora ({epochs_no_improve}/{args.patience})")
 
-        if epochs_no_improve >= args.patience:
-            print(f"\nEarly stopping en epoch {epoch}")
+        if epochs_no_improve >= config["training"]["patience"]:
+            print(f"\nEarly stopping")
             break
 
         if epoch % 10 == 0:
             torch.save(model.state_dict(),
-                       os.path.join(args.save_dir, f"model_{epoch}.pth"))
+                       os.path.join(config["paths"]["save_dir"], f"model_{epoch}.pth"))
 
 if __name__ == "__main__":
-    # data = np.load('data/datos_sinteticos/dataset_synthetic.npy')
-    # print("Shape:", data.shape)
-    # print("Rango:", data.min(), data.max())
-    #
-    # # energía por tap
-    # mag = np.abs(data[:, 0, :] + 1j * data[:, 1, :])
-    # pdp = np.mean(mag ** 2, axis=0)
-    # print("PDP primeros 10 taps:", pdp[:10])
-    # print("PDP últimos 10 taps:", pdp[-10:])
-    # print("Tap con máxima energía:", np.argmax(pdp))
-    # print("RMS delay medio (ns):", )
-    #
-    # delays = np.arange(128) * 1e-8
-    # rms_values = []
-    # for s in mag:
-    #     power = s ** 2
-    #     total = np.sum(power) + 1e-12
-    #     mean_d = np.sum(delays * power) / total
-    #     rms = np.sqrt(np.sum(power * (delays - mean_d) ** 2) / total)
-    #     rms_values.append(rms)
-    # print(f"RMS delay medio real: {np.mean(rms_values) * 1e9:.3f} ns")
-    # print(f"RMS delay std: {np.std(rms_values) * 1e9:.3f} ns")
-
     train()
