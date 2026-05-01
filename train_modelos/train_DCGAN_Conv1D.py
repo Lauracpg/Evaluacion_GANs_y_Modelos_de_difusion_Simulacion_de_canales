@@ -199,24 +199,30 @@ def train_gan(G, D, loader, device, config):
     print("Entrenamiento completado. Modelos guardados en", save_dir)
     print(f"Mejor G_loss: {best_g_loss:.4f}")
 
-if __name__ == "__main__":
-    config = load_config()
-
-    # dispositivo (GPU si está disponible)
+def train(config_path):
+    config = load_config(config_path)
+    torch.manual_seed(config["experiment"]["seed"])
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(config["paths"]["save_dir"], exist_ok=True)
-
-    ### Cargar dataset ###
     data = np.load(config["dataset"]["path"]).astype(np.float32)
-
-    # convertir a tensores de PyTorch y crear un DataLoader
     dataset = TensorDataset(torch.from_numpy(data))
-    loader = DataLoader(dataset, batch_size=config["training"]["batch_size"], shuffle=True, drop_last=True)
-    print(f"Dataset cargado: {len(dataset)} señales de longitud {config['model']['signal_length']}")
-    # Crear instancias de ambos modelos
-    G = Generator(config["model"]["z_dim"], config["model"]["signal_length"]).to(device)
-    D = Discriminator(config["model"]["signal_length"]).to(device)
+    loader = DataLoader(
+        dataset,
+        batch_size=config["training"]["batch_size"],
+        shuffle=True,
+        drop_last=True
+    )
+
+    G = Generator(
+        config["model"]["z_dim"],
+        config["model"]["signal_length"]
+    ).to(device)
+
+    D = Discriminator(
+        config["model"]["signal_length"]
+    ).to(device)
+
     G.apply(weights_init)
     D.apply(weights_init)
 
-    train_gan(G,D, loader, device, config)
+    train_gan(G, D, loader, device, config)

@@ -6,13 +6,8 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 from scipy.stats import ttest_ind
 
-#from train_DDIM import Diffusion, DDIMSampler, UNet1D
-from train_DDPM import UNet1D, DDPM
-#from train_GAN_Conv1D import Generator
-#from train_DCGAN_Conv1D import Generator
-from train_WGAN import Generator
-
 import json
+import importlib
 
 def load_config(path="evaluation_config.json"):
     with open(path, "r") as f:
@@ -20,6 +15,30 @@ def load_config(path="evaluation_config.json"):
 
 def to_db(x, eps=1e-10):
     return 10 * np.log10(np.maximum(x, eps))
+
+def mae(a, b):
+    return np.mean(np.abs(a - b))
+
+def load_model_bundle(model_type):
+    module_map = {
+        "gan": ("train_GAN_Conv1D", ["Generator"]),
+        "dcgan": ("train_DCGAN_Conv1D", ["Generator"]),
+        "wgan": ("train_WGAN", ["Generator"]),
+        "ddpm": ("train_DDPM", ["UNet1D", "DDPM"]),
+        "ddim": ("train_DDIM", ["UNet1D", "Diffusion", "DDIMSampler"]),
+    }
+
+    if model_type not in module_map:
+        raise ValueError(f"Modelo no soportado: {model_type}")
+
+    module_name, attrs = module_map[model_type]
+    m = importlib.import_module(module_name)
+
+    return {a: getattr(m, a) for a in attrs}
+
+def compute_pdp(signals):
+    power = np.abs(signals) ** 2
+    return np.mean(power, axis=0)
 
 def compute_energy(signals):
     """Energía total de cada señal"""
@@ -39,16 +58,6 @@ def compute_autocorrelation(signals):
         ac = ac[ac.size//2:] # solo la mitad positiva
         autocorrelation += ac / (np.max(ac) + 1e-12)
     return autocorrelation / N
-
-def compute_histogram(signals, bins=50, range=(-1,1)):
-    """Histograma normalizado de magnitudes |h[n]|"""
-    mags = np.abs(signals).flatten()
-    hist, edges = np.histogram(mags, bins=bins, range=range, density=True)
-    return hist, edges[:-1]
-
-def compute_pdp(signals):
-    power = np.abs(signals) ** 2
-    return np.mean(power, axis=0)
 
 def compute_average_delay(signals, delta_tau=1.0):
     """
@@ -83,6 +92,12 @@ def compute_rms_delay_spread(signals, delta_tau=1.0):
     rms_values = np.array(rms_values)
     return np.mean(rms_values), rms_values
 
+def compute_histogram(signals, bins=50, range=(-1,1)):
+    """Histograma normalizado de magnitudes |h[n]|"""
+    mags = np.abs(signals).flatten()
+    hist, edges = np.histogram(mags, bins=bins, range=range, density=True)
+    return hist, edges[:-1]
+
 def compute_psd(signals, fs=1.0):
     """PSD promedio de las señales"""
     psds = []
@@ -92,80 +107,73 @@ def compute_psd(signals, fs=1.0):
     psds = np.array(psds)
     return np.mean(psds, axis=0), f
 
-def mae(a, b):
-    return np.mean(np.abs(a - b))
-
 def evaluate_metrics(real, fake, delta_tau=1.0):
-    """Calcula todas las métricas y devuelve un diccionario con resultados y datos para gráficas."""
-    metrics = {}
+    m = {}
 
-    # Métricas clásicas
-    metrics['pdp_real'] = compute_pdp(real)
-    metrics['pdp_fake'] = compute_pdp(fake)
-    metrics['pdp_mae'] = mae(metrics['pdp_real'], metrics['pdp_fake'])
-    metrics['pdp_real_db'] = to_db(metrics['pdp_real'])
-    metrics['pdp_fake_db'] = to_db(metrics['pdp_fake'])
+    # PDP
+    m["pdp_real"] = compute_pdp(real)
+    m["pdp_fake"] = compute_pdp(fake)
 
-    mask = metrics['pdp_real'] > 1e-6  # o equivalente en potencia
-    metrics['pdp_mae_db'] = np.mean(
-        np.abs(metrics['pdp_real_db'][mask] - metrics['pdp_fake_db'][mask])
+    m["pdp_mae"] = mae(m["pdp_real"], m["pdp_fake"])
+
+    m["pdp_real_db"] = to_db(m["pdp_real"])
+    m["pdp_fake_db"] = to_db(m["pdp_fake"])
+
+    mask = m["pdp_real"] > 1e-6
+    m["pdp_mae_db"] = np.mean(
+        np.abs(m["pdp_real_db"][mask] - m["pdp_fake_db"][mask])
     )
 
-    # Average delay por señal
-    metrics['avg_real'], metrics['avg_real_all'] = compute_average_delay(real, delta_tau)
-    metrics['avg_fake'], metrics['avg_fake_all'] = compute_average_delay(fake, delta_tau)
-    metrics['avg_delay_mae'] = abs(metrics['avg_real'] - metrics['avg_fake'])
-    metrics['avg_delay_mae_ns'] = metrics['avg_delay_mae'] * 1e9
+    # Delay
+    m["avg_real"], m["avg_real_all"] = compute_average_delay(real, delta_tau)
+    m["avg_fake"], m["avg_fake_all"] = compute_average_delay(fake, delta_tau)
 
-    # RMS delay spread por señal
-    metrics['rms_real'], metrics['rms_real_all'] = compute_rms_delay_spread(real, delta_tau)
-    metrics['rms_fake'], metrics['rms_fake_all'] = compute_rms_delay_spread(fake, delta_tau)
-    metrics['rms_mae'] = abs(metrics['rms_real'] - metrics['rms_fake'])
-    metrics['rms_mae_ns'] = metrics['rms_mae'] * 1e9
-    # T-Test Student
-    t_stat, t_pvalue = ttest_ind(
-        metrics['rms_real_all'],
-        metrics['rms_fake_all'],
-        equal_var=False
+    m["avg_delay_mae"] = abs(m["avg_real"] - m["avg_fake"])
+    m["avg_delay_mae_ns"] = m["avg_delay_mae"] * 1e9
+
+    m["rms_real"], m["rms_real_all"] = compute_rms_delay_spread(real, delta_tau)
+    m["rms_fake"], m["rms_fake_all"] = compute_rms_delay_spread(fake, delta_tau)
+
+    m["rms_mae"] = abs(m["rms_real"] - m["rms_fake"])
+    m["rms_mae_ns"] = m["rms_mae"] * 1e9
+
+    # tests
+    m["rms_t_stat"], m["rms_t_pvalue"] = ttest_ind(
+        m["rms_real_all"], m["rms_fake_all"], equal_var=False
     )
-    metrics['rms_t_stat'] = t_stat
-    metrics['rms_t_pvalue'] = t_pvalue
 
-    t_stat, t_pvalue = ttest_ind(
-        metrics['avg_real_all'],
-        metrics['avg_fake_all'],
-        equal_var=False
+    m["avg_t_stat"], m["avg_t_pvalue"] = ttest_ind(
+        m["avg_real_all"], m["avg_fake_all"], equal_var=False
     )
-    metrics['avg_t_stat'] = t_stat
-    metrics['avg_t_pvalue'] = t_pvalue
 
-    # Métricas adicionales
-    metrics['std_real'] = compute_std_per_tap(real)
-    metrics['std_fake'] = compute_std_per_tap(fake)
-    metrics['std_mae'] = mae(metrics['std_real'], metrics['std_fake'])
+    # STD
+    m["std_real"] = compute_std_per_tap(real)
+    m["std_fake"] = compute_std_per_tap(fake)
+    m["std_mae"] = mae(m["std_real"], m["std_fake"])
 
-    metrics['autocorr_real'] = compute_autocorrelation(real)
-    metrics['autocorr_fake'] = compute_autocorrelation(fake)
-    metrics['autocorr_mae'] = mae(metrics['autocorr_real'], metrics['autocorr_fake'])
+    # autocorr
+    m["autocorr_real"] = compute_autocorrelation(real)
+    m["autocorr_fake"] = compute_autocorrelation(fake)
+    m["autocorr_mae"] = mae(m["autocorr_real"], m["autocorr_fake"])
 
-    # Histogramas
-    metrics['hist_real'], metrics['bins_real'] = compute_histogram(real)
-    metrics['hist_fake'], metrics['bins_fake'] = compute_histogram(fake)
+    # hist
+    m["hist_real"], m["bins_real"] = compute_histogram(real)
+    m["hist_fake"], m["bins_fake"] = compute_histogram(fake)
 
     # PSD
-    metrics['psd_real'], metrics['freqs'] = compute_psd(real)
-    metrics['psd_fake'], _ = compute_psd(fake)
-    metrics['psd_mae'] = mae(metrics['psd_real'], metrics['psd_fake'])
+    m["psd_real"], m["freqs"] = compute_psd(real)
+    m["psd_fake"], _ = compute_psd(fake)
 
-    metrics['psd_real_db'] = to_db(metrics['psd_real'])
-    metrics['psd_fake_db'] = to_db(metrics['psd_fake'])
-    metrics['psd_mae_db'] = mae(metrics['psd_real_db'], metrics['psd_fake_db'])
+    m["psd_mae"] = mae(m["psd_real"], m["psd_fake"])
 
-    return metrics
+    m["psd_real_db"] = to_db(m["psd_real"])
+    m["psd_fake_db"] = to_db(m["psd_fake"])
+    m["psd_mae_db"] = mae(m["psd_real_db"], m["psd_fake_db"])
 
+    return m
 
 def generate_signals(config, model_type, model_checkpoint, num_samples,
-                     device):
+                     device, model_bundle):
     """
     Genera señales sintéticas de canal utilizando un modelo ya entrenado,
     sin alterar los pesos ni la distribución aprendida.
@@ -173,12 +181,13 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
     Return:
     array (num_samples, L) con las señales generadas (normalizadas en [-1,1]).
     """
-    L = config["experiment"]["signal_length"]
+    L = config["data"]["signal_length"]
     z_dim = config["models"][model_type].get("z_dim", None)
     ddpm_steps = config["models"][model_type].get("T", 1000)
 
     if model_type == 'gan':
         checkpoint = torch.load(model_checkpoint, map_location=device)
+        Generator = model_bundle["Generator"]
         G = Generator(z_dim=z_dim, L=L).to(device)
         G.load_state_dict(checkpoint["G"])
         G.eval()
@@ -191,6 +200,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
     elif model_type == 'dcgan':
         # cargar checkpoint y reconstruir el generador
         checkpoint = torch.load(model_checkpoint, map_location=device)
+        Generator = model_bundle["Generator"]
         G = Generator(z_dim=z_dim, L=L).to(device)
         G.load_state_dict(checkpoint['G'])
         G.eval()
@@ -203,6 +213,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
     # WGAN-GP
     elif model_type == 'wgan':
         checkpoint = torch.load(model_checkpoint, map_location=device)
+        Generator = model_bundle["Generator"]
         G = Generator(z_dim=z_dim, L=L).to(device)
         G.load_state_dict(checkpoint['G'])
         G.eval()
@@ -214,8 +225,10 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
     # DDPM: generación mediante proceso inverso de difusión
     elif model_type == 'ddpm':
         # cargar U-Net entrenada
+        UNet1D = model_bundle["UNet1D"]
+        DDPM = model_bundle["DDPM"]
         checkpoint = torch.load(model_checkpoint, map_location=device)
-        unet = UNet1D().to(device)
+        unet = UNet1D(time_emb_dim=config["models"]["ddpm"]["time_emb_dim"]).to(device)
         unet.load_state_dict(checkpoint)
 
         # reconstruir DDPM con el mismo número de pasos T
@@ -252,73 +265,94 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
             fake = x0.cpu().numpy()
 
     elif model_type == 'ddim':
+        UNet1D = model_bundle["UNet1D"]
+        Diffusion = model_bundle["Diffusion"]
+        DDIMSampler = model_bundle["DDIMSampler"]
         checkpoint = torch.load(model_checkpoint, map_location=device)
+
         unet = UNet1D().to(device)
         unet.load_state_dict(checkpoint)
         unet.eval()
 
-        diffusion = Diffusion(unet, T=ddpm_steps).to(device)
-        sampler = DDIMSampler(diffusion, eta=0.0)  # determinista
+        data = np.load(config["data"]["path"]).astype(np.float32)
+        diffusion = Diffusion(unet, T=ddpm_steps, data=data).to(device)
+        sampler = DDIMSampler(diffusion, eta=config["models"]["ddim"]["eta"])  # determinista
 
         with torch.no_grad():
             return sampler.sample(
-                shape=(num_samples, 2, config["model"]["ddim"]["L"]),
+                shape=(num_samples, 2, L),
                 device=device,
-                steps=config["model"]["ddim"]["steps"]
+                steps=config["models"]["ddim"]["sampling_steps"]
             ).cpu().numpy()
     else:
-        raise ValueError('Invalid model type')
+        raise ValueError(model_type)
 
     return fake
 
-# MAIN
-def main(args):
-    np.random.seed(42)
-    torch.manual_seed(42)
+def main(args, config):
+    seed = config["experiment"]["seed"]
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
     print("\n=== Cargando datos ===")
-    data = np.load(args.data).astype(np.float32)
-    idx = np.random.choice(len(data), args.num_eval, replace=False)
-    real_eval = data[idx]
-    print("Dataset cargado:", data.shape)
+    real_eval = load_real_data(args.data, args.num_eval)
+    print("Dataset cargado:", real_eval.shape)
 
     print(f"\n=== Generando señales con {args.model_type.upper()} ===")
-    config = load_config()
+    model_bundle = load_model_bundle(args.model_type)
 
     fake_eval = generate_signals(
         config=config,
         model_type=args.model_type,
         model_checkpoint=args.model,
         num_samples=args.num_eval,
-        device=args.device
+        device=args.device,
+        model_bundle=model_bundle
     )
 
     print("Señales generadas:", fake_eval.shape)
 
-    real_eval_complex = real_eval[:, 0, :] + 1j * real_eval[:, 1, :]
-    fake_eval_complex = fake_eval[:, 0, :] + 1j * fake_eval[:, 1, :]
-    real_mag = np.abs(real_eval_complex)
-    fake_mag = np.abs(fake_eval_complex)
+    real_mag, fake_mag = to_magnitude(real_eval, fake_eval)
 
-    # calcular métricas
     metrics = evaluate_metrics(real_mag, fake_mag, delta_tau=args.delta_tau)
+    print_metrics(metrics)
+    print_physical_metrics(metrics)
+    save_metrics(args, metrics)
+    write_metrics_file(args, metrics)
+    plot_results(args, metrics, real_mag, fake_mag)
 
+    return metrics
+
+def load_real_data(path, num_eval):
+    data = np.load(path).astype(np.float32)
+    idx = np.random.choice(len(data), num_eval, replace=False)
+    return data[idx]
+
+def to_magnitude(real_eval, fake_eval):
+    real_complex = real_eval[:, 0, :] + 1j * real_eval[:, 1, :]
+    fake_complex = fake_eval[:, 0, :] + 1j * fake_eval[:, 1, :]
+    return np.abs(real_complex), np.abs(fake_complex)
+
+def print_metrics(metrics):
     print("\n--- RESULTADOS ---")
-    for key in ['pdp_mae', 'pdp_mae_db',
-                'avg_delay_mae_ns', 'rms_mae_ns',
-                'std_mae', 'autocorr_mae',
-                'psd_mae', 'psd_mae_db']:
+    for key in [
+        'pdp_mae', 'pdp_mae_db',
+        'avg_delay_mae_ns', 'rms_mae_ns',
+        'std_mae', 'autocorr_mae',
+        'psd_mae', 'psd_mae_db'
+    ]:
+        val = metrics[key]
+
         if key in ['avg_delay_mae_ns', 'rms_mae_ns']:
-            print(f"{key}: {metrics[key]:.3f} ns")
-
+            print(f"{key}: {val:.3f} ns")
         elif key == 'pdp_mae_db':
-            print(f"{key}: {metrics[key]:.3f} dB")
-
+            print(f"{key}: {val:.3f} dB")
         elif key == 'psd_mae_db':
-            print(f"{key}: {metrics[key]:.3f} dB/Hz")
-
+            print(f"{key}: {val:.3f} dB/Hz")
         else:
-            print(f"{key}: {metrics[key]:.6f}")
+            print(f"{key}: {val:.6f}")
 
+def print_physical_metrics(metrics):
     ns = 1e9
 
     print("\n--- MÉTRICAS REALES ---")
@@ -331,28 +365,22 @@ def main(args):
     print(f"RMS delay fake: {metrics['rms_fake'] * ns:.3f} ns")
     print(f"Mean PSD fake: {np.mean(metrics['psd_fake_db']):.3f} dB/Hz")
 
-    # Guardar resultados
+def save_metrics(args, metrics):
     os.makedirs(args.save_dir, exist_ok=True)
-    np.save(os.path.join(args.save_dir, 'metrics.npy'), metrics)
+    np.save(os.path.join(args.save_dir, "metrics.npy"), metrics)
 
+def write_metrics_file(args, metrics):
     scalar_keys = [
-        'pdp_mae',
-        'pdp_mae_db',
-        'avg_delay_mae_ns',
-        'rms_mae_ns',
-        'std_mae',
-        'autocorr_mae',
-        'psd_mae',
-        'psd_mae_db',
+        'pdp_mae', 'pdp_mae_db',
+        'avg_delay_mae_ns', 'rms_mae_ns',
+        'std_mae', 'autocorr_mae',
+        'psd_mae', 'psd_mae_db'
     ]
 
-    txt_path = os.path.join(args.save_dir, "metrics.txt")
+    def significance(p):
+        return "STATISTICALLY SIMILAR" if p > 0.05 else "STATISTICALLY DIFFERENT"
 
-    def significado_ttest(p):
-        if p > 0.05:
-            return "STATISTICALLY SIMILAR"
-        else:
-            return "STATISTICALLY DIFFERENT"
+    txt_path = os.path.join(args.save_dir, "metrics.txt")
 
     with open(txt_path, "w") as f:
         f.write("===== RESULTADOS EVALUACION =====\n")
@@ -361,7 +389,6 @@ def main(args):
         f.write(f"Num eval samples: {args.num_eval}\n")
         f.write("=" * 50 + "\n\n")
 
-        # Métricas globales comparación
         f.write("---- METRICAS GLOBALES ----\n")
         for k in scalar_keys:
             if k in ['avg_delay_mae_ns', 'rms_mae_ns']:
@@ -379,35 +406,23 @@ def main(args):
         f.write(f"AVG delay t-test statistic: {metrics['avg_t_stat']:.6f}\n")
         f.write(f"AVG delay t-test p_value: {metrics['avg_t_pvalue']:.3e}\n")
 
-        f.write("\n")
-
-        # Estadísticas REALES
-        f.write("---- REAL CHANNEL STATS ----\n")
+        f.write("\n---- REAL CHANNEL STATS ----\n")
         f.write(f"Avg delay real: {metrics['avg_real'] * 1e9:.3f} ns\n")
         f.write(f"RMS delay real: {metrics['rms_real'] * 1e9:.3f} ns\n")
         f.write(f"Mean PSD real: {np.mean(metrics['psd_real_db']):.3f} dB/Hz\n")
 
-        f.write("\n")
-
-        # Estadísticas GENERADAS
-        f.write("---- GENERATED CHANNEL STATS ----\n")
+        f.write("\n---- GENERATED CHANNEL STATS ----\n")
         f.write(f"Avg delay fake: {metrics['avg_fake'] * 1e9:.3f} ns\n")
         f.write(f"RMS delay fake: {metrics['rms_fake'] * 1e9:.3f} ns\n")
         f.write(f"Mean PSD fake: {np.mean(metrics['psd_fake_db']):.3f} dB/Hz\n")
-        f.write("\n")
 
         f.write("\n---- STATISTICAL INTERPRETATION ----\n")
-        f.write(
-            f"RMS comparison: "
-            f"{significado_ttest(metrics['rms_t_pvalue'])}\n"
-        )
-        f.write(
-            f"AVG delay comparison: "
-            f"{significado_ttest(metrics['avg_t_pvalue'])}\n"
-        )
-    # Gráfico PDP
+        f.write(f"RMS comparison: {significance(metrics['rms_t_pvalue'])}\n")
+        f.write(f"AVG delay comparison: {significance(metrics['avg_t_pvalue'])}\n")
+
+def plot_results(args, metrics, real_mag, fake_mag):
     plt.figure(figsize=(8, 4))
-    delays = np.arange(len(metrics['pdp_real_db'])) * args.delta_tau * 1e9  # ns
+    delays = np.arange(len(metrics['pdp_real_db'])) * args.delta_tau * 1e9
     plt.plot(delays, metrics['pdp_real_db'], label="Real")
     plt.plot(delays, metrics['pdp_fake_db'], label="Generado")
     plt.title("PDP (dB) Real vs Generado")
@@ -415,9 +430,8 @@ def main(args):
     plt.ylabel("Power (dB)")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(args.save_dir, 'pdp.png'))
+    plt.savefig(os.path.join(args.save_dir, "pdp.png"))
 
-    # Histograma de magnitudes
     plt.figure(figsize=(8, 4))
     plt.bar(metrics['bins_real'], metrics['hist_real'], width=0.03, alpha=0.6, label="Real")
     plt.bar(metrics['bins_fake'], metrics['hist_fake'], width=0.03, alpha=0.6, label="Generado")
@@ -426,9 +440,8 @@ def main(args):
     plt.ylabel("Probability Density")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(args.save_dir, 'histograma.png'))
+    plt.savefig(os.path.join(args.save_dir, "histograma.png"))
 
-    # Gráfico PSD
     plt.figure(figsize=(8, 4))
     plt.plot(metrics['freqs'], metrics['psd_real_db'], label='Real')
     plt.plot(metrics['freqs'], metrics['psd_fake_db'], label='Generado')
@@ -438,15 +451,15 @@ def main(args):
     plt.tight_layout()
     plt.savefig(os.path.join(args.save_dir, "psd.png"))
 
-    # Señales reales vs generadas (8)
     num_plot = min(8, args.num_eval)
     plt.figure(figsize=(12, 6))
     for i in range(num_plot):
         plt.subplot(4, 2, i + 1)
         plt.plot(real_mag[i], label='Real')
         plt.plot(fake_mag[i], '--', label='Generado')
-        plt.xticks([]);
+        plt.xticks([])
         plt.yticks([])
+
     plt.suptitle(f"Comparación señales reales vs {args.model_type.upper()}")
     plt.legend(loc='upper right', fontsize=8)
     plt.tight_layout()
@@ -474,7 +487,7 @@ if __name__ == "__main__":
         args.save_dir = os.path.join(base_save_dir, "DCGAN_Conv1D")
 
     elif args.model_type == "wgan":
-        args.save_dir = os.path.join(base_save_dir, "WGAN_GP_Conv1D")
+        args.save_dir = os.path.join(base_save_dir, "WGAN_Conv1D")
 
     elif args.model_type == "ddpm":
         args.save_dir = os.path.join(base_save_dir, "DDPM_Conv1D")
@@ -487,4 +500,4 @@ if __name__ == "__main__":
 
     os.makedirs(args.save_dir, exist_ok=True)
 
-    main(args)
+    main(args, config)

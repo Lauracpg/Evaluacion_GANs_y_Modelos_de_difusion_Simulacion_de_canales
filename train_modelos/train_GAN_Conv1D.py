@@ -177,19 +177,11 @@ def train_gan(G, D, loader, device, config):
 
     print("Entrenamiento completado. Modelos guardados en", paths["save_dir"])
 
-if __name__ == "__main__":
-    config = load_config()
-
+def train(config_path):
+    config = load_config(config_path)
     torch.manual_seed(config["experiment"]["seed"])
-
-    # dispositivo (GPU si está disponible)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    os.makedirs(config["paths"]["save_dir"], exist_ok=True)
-
-    ### Cargar dataset ###
     data = np.load(config["dataset"]["path"]).astype(np.float32)
-
-    # convertir a tensores de PyTorch y crear un DataLoader
     dataset = TensorDataset(torch.from_numpy(data))
     loader = DataLoader(
         dataset,
@@ -198,9 +190,14 @@ if __name__ == "__main__":
         drop_last=True
     )
 
-    # Crear instancias de ambos modelos
-    G = Generator(config["model"]["z_dim"], config["model"]["signal_length"]).to(device)
-    D = Discriminator(config["model"]["signal_length"]).to(device)
+    G = Generator(
+        config["model"]["z_dim"],
+        config["model"]["signal_length"]
+    ).to(device)
+
+    D = Discriminator(
+        config["model"]["signal_length"]
+    ).to(device)
 
     G.apply(weights_init)
     D.apply(weights_init)

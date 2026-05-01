@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import numpy as np
 import math
 from torch.utils.data import DataLoader, TensorDataset
-import argparse
 import os
 import json
 
@@ -148,12 +147,13 @@ def compute_rms_torch(x, delta_tau=1e-8):
 # implementa el proceso forward: q(xt | x0)
 # añade ruido progresivamente a la señal
 class Diffusion(nn.Module):
-    def __init__(self, model, T=1000, data=None):
+    def __init__(self, model, T=1000, data=None, lambda_rms=1.0):
         super().__init__()
         self.model = model
 
         # número total de pasos de difusión
         self.T = T
+        self.lambda_rms = lambda_rms
 
         betas = cosine_beta_schedule(T)
         alphas = 1. - betas
@@ -220,9 +220,7 @@ class Diffusion(nn.Module):
 
         loss_rms = torch.mean((rms_real - rms_pred) ** 2)
 
-        lambda_rms = 1.0  # hiperparámetro
-
-        return loss_noise + lambda_rms * loss_rms
+        return loss_noise + self.lambda_rms * loss_rms
 
 # genera nuevas señales a partir de ruido puro
 # DDIm permite usar menos pasos
@@ -285,8 +283,8 @@ class DDIMSampler:
 
         return torch.clamp(x0_final, -1, 1)
 
-def train():
-    config = load_config()
+def train(config_path):
+    config = load_config(config_path)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(config["paths"]["save_dir"], exist_ok=True)
@@ -306,7 +304,8 @@ def train():
     diffusion = Diffusion(
         model,
         T=config["diffusion"]["T"],
-        data=data_np
+        data=data_np,
+        lambda_rms=config["diffusion"]["lambda_rms"]
     ).to(device)
 
     opt = torch.optim.Adam(
@@ -362,6 +361,3 @@ def train():
         if epoch % 10 == 0:
             torch.save(model.state_dict(),
                        os.path.join(config["paths"]["save_dir"], f"model_{epoch}.pth"))
-
-if __name__ == "__main__":
-    train()

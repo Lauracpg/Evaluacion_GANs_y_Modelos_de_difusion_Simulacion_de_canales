@@ -1,8 +1,7 @@
 {
   "experiment": {
     "name": "loopback_diffusion",
-    "seed": 42,
-    "model_type": "ddim"
+    "seed": 42
   },
 
   "dataset": {
@@ -15,9 +14,10 @@
   },
 
   "diffusion": {
-    "T": 1000,
     "schedule": "cosine",
-    "use_tap_weights": true
+    "use_tap_weights": true,
+    "T": 1000,
+    "lambda_rms": 1.0
   },
 
   "training": {
@@ -31,8 +31,7 @@
   },
 
   "paths": {
-    "save_dir": "checkpoints/datos_loopback/ddim",
-    "best_model": "best_model.pth",
-    "log_dir": "logs"
+    "save_dir": "checkpoints/datos_loopback/ddpm",
+    "best_model": "best_model.pth"
   }
 }

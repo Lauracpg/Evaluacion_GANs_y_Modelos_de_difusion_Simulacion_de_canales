@@ -183,11 +183,11 @@ class DDPM(nn.Module):
         # MSE loss
         return F.mse_loss(noise_pred, noise)
 
-def train():
+def train(config_path):
     """
     Bucle principal de entrenamiento del DDPM.
     """
-    config = load_config()
+    config = load_config(config_path)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(config["paths"]["save_dir"], exist_ok=True)
     # cargar dataset
@@ -242,10 +242,3 @@ def train():
         if epochs_no_improve >= config["training"]["patience"]:
             print(f"Early stopping")
             break
-
-        if epoch % 20 == 0:
-            torch.save(model.state_dict(),
-                       os.path.join(config["paths"]["save_dir"], f'model_e{epoch}.pth'))
-
-if __name__ == "__main__":
-    train()
