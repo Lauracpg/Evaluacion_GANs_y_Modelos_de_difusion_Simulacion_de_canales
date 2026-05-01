@@ -1,4 +1,3 @@
-import argparse
 import os
 import numpy as np
 import torch
@@ -6,7 +5,6 @@ from torch import nn
 from torch.nn.utils import spectral_norm
 from torch.utils.data import TensorDataset, DataLoader
 
-from train_DDIM import load_config
 import json
 
 def load_config(path="gans_config.json"):
@@ -99,8 +97,8 @@ def train_gan(G, D, loader, device, config):
     else:
         raise ValueError(f"Tipo de pérdida desconocido: {loss_type}")
     # optimizadores Adam para G y D
-    optD = torch.optim.Adam(D.parameters(), lr=lr, betas=(0.5, 0.999))
-    optG = torch.optim.Adam(G.parameters(), lr=lr, betas=(0.5, 0.999))
+    optD = torch.optim.Adam(D.parameters(), lr=lr, betas=training["gan"]["betas"])
+    optG = torch.optim.Adam(G.parameters(), lr=lr, betas=training["gan"]["betas"])
 
     best_g_loss = float('inf')
     epochs_no_improve = 0
@@ -214,8 +212,7 @@ if __name__ == "__main__":
     # convertir a tensores de PyTorch y crear un DataLoader
     dataset = TensorDataset(torch.from_numpy(data))
     loader = DataLoader(dataset, batch_size=config["training"]["batch_size"], shuffle=True, drop_last=True)
-    print(f"Dataset cargado: {len(dataset)} señales de longitud {config["model"]["signal_length"]}")
-
+    print(f"Dataset cargado: {len(dataset)} señales de longitud {config['model']['signal_length']}")
     # Crear instancias de ambos modelos
     G = Generator(config["model"]["z_dim"], config["model"]["signal_length"]).to(device)
     D = Discriminator(config["model"]["signal_length"]).to(device)

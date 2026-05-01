@@ -1,4 +1,3 @@
-import argparse
 import os
 import numpy as np
 import torch
@@ -80,7 +79,7 @@ def train_gan(G, D, loader, device, config):
     lr = training["lr"]
     z_dim = model_cfg["z_dim"]
 
-    betas = training["optimizer_betas_gan"]
+    betas = training["gan"]["betas"]
 
     # Función de pérdida binaria (real vs falso)
     loss_type = config["loss"]["type"]

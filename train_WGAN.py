@@ -1,23 +1,34 @@
-import argparse
+import math
 import os
 import numpy as np
 import torch
-from sympy.physics.pring import energy
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
+import json
+
+def load_config(path="gans_config.json"):
+    with open(path, "r") as f:
+        return json.load(f)
 
 # ----- GENERATOR Conv1D ----- #
 class Generator(nn.Module):
     def __init__(self, z_dim, L):
         super().__init__()
-        self.init_len = L // 8
-        self.fc = nn.Linear(z_dim, 128 * self.init_len)
-        self.bn0 = nn.BatchNorm1d(128)
+
+        self.L = int(L)
+        self.init_len = int(math.ceil(self.L / 16)) # 4 unsamplings
+
+        self.fc = nn.Linear(z_dim, 256 * self.init_len)
+        self.bn0 = nn.BatchNorm1d(256)
 
         self.net = nn.Sequential(
             nn.ReLU(True),
 
-            nn.ConvTranspose1d(128, 128, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose1d(256, 256, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(256),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(256, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
 
@@ -29,17 +40,18 @@ class Generator(nn.Module):
             nn.BatchNorm1d(32),
             nn.ReLU(True),
 
-            nn.ConvTranspose1d(32, 2, kernel_size=3, padding=1),
+            nn.Conv1d(32, 2, kernel_size=3, padding=1),
             nn.Tanh()
         )
 
     def forward(self, z):
         x = self.fc(z)
-        x = x.view(z.size(0), 128, self.init_len)
+        x = x.view(z.size(0), 256, self.init_len)
         x = self.bn0(x)
         x = self.net(x)
         # energy = torch.sqrt(torch.sum(x ** 2, dim=2, keepdim=True))
         # x = x / (energy + 1e-12)
+        x = x[:, :, :self.L]
         return x
 
 # ----- DISCRIMINATOR Conv1D ----- #
@@ -47,16 +59,19 @@ class Discriminator(nn.Module):
     def __init__(self, L):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv1d(2, 32, 4, 2, 1),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv1d(32, 64, 4, 2, 1),
+            nn.Conv1d(2, 64, 4, 2, 1),
             nn.LeakyReLU(0.2),
 
             nn.Conv1d(64, 128, 4, 2, 1),
             nn.LeakyReLU(0.2),
+
+            nn.Conv1d(128, 256, 4, 2, 1),
+            nn.LeakyReLU(0.2),
+
+            nn.Conv1d(256, 512, 4, 2, 1),
+            nn.LeakyReLU(0.2),
         )
-        self.fc = nn.Linear(128 * (L // 8), 1)
+        self.fc = nn.Linear(512 * (L // 16), 1)
 
     def forward(self, x):
         f = self.net(x)
@@ -100,17 +115,26 @@ def gradient_penalty(critic, real, fake, device):
 def compute_pdp(x):
     return torch.mean(x ** 2, dim=0)
 
-def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
-              λ_gp=10, n_critic=5,z_dim=128,
-              patience=15, min_delta=1e-4,
-              save_dir='checkpoints/WGAN_Conv1D'):
-
+def train_gan(G, C, loader, device, config):
     # El critic no clasifica, asigna una "energía" o score real-valued
     # Objetivo: aproximar la distancia entre distribuciones (Wasserstein)
+    training = config["training"]
+    paths = config["paths"]
+    model_cfg = config["model"]
 
-    os.makedirs(save_dir, exist_ok=True)
-    optC = torch.optim.Adam(C.parameters(), lr=lr, betas=(0.0, 0.9))
-    optG = torch.optim.Adam(G.parameters(), lr=lr, betas=(0.0, 0.9))
+    os.makedirs(paths["save_dir"], exist_ok=True)
+
+    lr = training["lr"]
+    epochs = training["epochs"]
+    n_critic = training["wgan"]["n_critic"]
+    λ_gp = training["wgan"]["lambda_gp"]
+    patience = training["patience"]
+    min_delta = training["min_delta"]
+
+    betas = training["wgan"]["betas"]
+
+    optC = torch.optim.Adam(C.parameters(), lr=lr, betas=betas)
+    optG = torch.optim.Adam(G.parameters(), lr=lr, betas=betas)
 
     best_w_dist = -float("inf")
     epochs_no_improve = 0
@@ -130,7 +154,7 @@ def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
 
             ### TRAIN CRITIC ###
             for _ in range(n_critic):
-                z = torch.randn(bsize, z_dim, device=device)
+                z = torch.randn(bsize, model_cfg["z_dim"], device=device)
                 fake = G(z).detach()
 
                 real_score = C(real).mean()
@@ -150,13 +174,13 @@ def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
 
             # después de entrenar el critic, usamos los mismo batch de real/fake para W_dist
             with torch.no_grad():
-                z = torch.randn(bsize, z_dim, device=device)
+                z = torch.randn(bsize, model_cfg["z_dim"], device=device)
                 fake_for_wdist = G(z)
                 # No es una loss de clasificación: es una estimación de la distancia entre distribuciones
                 w_dist_epoch += (C(real).mean() - C(fake_for_wdist).mean()).item()
 
             ### TRAIN GENERADOR ###
-            z = torch.randn(bsize, z_dim, device=device)
+            z = torch.randn(bsize, model_cfg["z_dim"], device=device)
             fake = G(z)
 
             # El generador intenta aumentar el score del critic
@@ -189,7 +213,7 @@ def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
                 'C': C.state_dict(),
                 'epoch': epoch,
                 'W_dist': best_w_dist
-            }, os.path.join(save_dir, 'best_model.pth'))
+            }, os.path.join(paths["save_dir"], paths["best_model"]))
 
             print("Nuevo mejor modelo guardado")
 
@@ -200,49 +224,38 @@ def train_gan(G, C, loader, device, epochs=100, lr=1e-4,
             print(f"Early stopping en epoch {epoch}")
             break
 
-    print("Entrenamiento completado. Modelos guardados en", save_dir)
+    print("Entrenamiento completado. Modelos guardados en", paths["save_dir"])
 
 if __name__ == "__main__":
-    ### Parámetros de ejecución ###
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='data/datos_sinteticos/dataset_synthetic.npy', help='Ruta del dataset .npy')
-    parser.add_argument('--epochs', type=int, default=150, help='Número de épocas de entrenamiento')
-    parser.add_argument('--batch_size', type=int, default=64, help='Tamaño del batch')
-    parser.add_argument('--z_dim', type=int, default=64, help='Dimensión del vector de ruido del generador')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate (tasa de aprendizaje)')
-    parser.add_argument('--n_critic', type=int, default=7,help='Número de updates del critic por update del generator')
-    parser.add_argument('--lambda_gp', type=float,default=5.0, help='Peso del gradient penalty')
-    parser.add_argument('--patience', type=int, default=40,help='Paciencia para early stopping')
-    parser.add_argument('--min_delta', type=float,default=1e-3,help='Mejora mínima en Wasserstein distance')
-    parser.add_argument('--save_dir', type=str, default='checkpoints/WGAN_GP_Conv1D', help='Carpeta donde guardar checkpoints')
-    parser.add_argument('--L', type=int, default=128, help='Longitud de las señales (número de muestras)')
-
-    args = parser.parse_args()
+    config = load_config()
+    torch.manual_seed(config["experiment"]["seed"])
 
     # dispositivo (GPU si está disponible)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    os.makedirs(args.save_dir, exist_ok=True)
 
     ### Cargar dataset ###
-    data = np.load(args.data).astype(np.float32)
+    data = np.load(config["dataset"]["path"]).astype(np.float32)
 
     # convertir a tensores de PyTorch y crear un DataLoader
     dataset = TensorDataset(torch.from_numpy(data))
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
-    print(f"Dataset cargado: {len(dataset)} señales de longitud {args.L}")
+    loader = DataLoader(
+        dataset,
+        batch_size=config["training"]["batch_size"],
+        shuffle=True,
+        drop_last=True
+    )
 
     # Crear instancias de ambos modelos
-    G = Generator(args.z_dim, args.L).to(device)
-    C = Discriminator(args.L).to(device)
+    G = Generator(
+        config["model"]["z_dim"],
+        config["model"]["signal_length"]
+    ).to(device)
+
+    C = Discriminator(
+        config["model"]["signal_length"]
+    ).to(device)
+
     G.apply(weights_init)
     C.apply(weights_init)
 
-    train_gan(G,C, loader, device,
-              epochs = args.epochs,
-              lr=args.lr,
-              λ_gp=args.lambda_gp,
-              n_critic=args.n_critic,
-              z_dim=args.z_dim,
-              patience=args.patience,
-              min_delta=args.min_delta,
-              save_dir=args.save_dir)
+    train_gan(G,C, loader, device,config)
