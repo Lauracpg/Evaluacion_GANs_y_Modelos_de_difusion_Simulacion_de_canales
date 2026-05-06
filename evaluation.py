@@ -9,7 +9,9 @@ from scipy.stats import ttest_ind
 import json
 import importlib
 
-def load_config(path="evaluation_config.json"):
+from BER import compute_ber
+
+def load_config(path="config/evaluation_config.json"):
     with open(path, "r") as f:
         return json.load(f)
 
@@ -21,11 +23,11 @@ def mae(a, b):
 
 def load_model_bundle(model_type):
     module_map = {
-        "gan": ("train_GAN_Conv1D", ["Generator"]),
-        "dcgan": ("train_DCGAN_Conv1D", ["Generator"]),
-        "wgan": ("train_WGAN", ["Generator"]),
-        "ddpm": ("train_DDPM", ["UNet1D", "DDPM"]),
-        "ddim": ("train_DDIM", ["UNet1D", "Diffusion", "DDIMSampler"]),
+        "gan": ("train_modelos.train_GAN_Conv1D", ["Generator"]),
+        "dcgan": ("train_modelos.train_DCGAN_Conv1D", ["Generator"]),
+        "wgan": ("train_modelos.train_WGAN", ["Generator"]),
+        "ddpm": ("train_modelos.train_DDPM", ["UNet1D", "DDPM"]),
+        "ddim": ("train_modelos.train_DDIM", ["UNet1D", "Diffusion", "DDIMSampler"]),
     }
 
     if model_type not in module_map:
@@ -173,7 +175,7 @@ def evaluate_metrics(real, fake, delta_tau=1.0):
     return m
 
 def generate_signals(config, model_type, model_checkpoint, num_samples,
-                     device, model_bundle):
+                     device, model_bundle, seed):
     """
     Genera señales sintéticas de canal utilizando un modelo ya entrenado,
     sin alterar los pesos ni la distribución aprendida.
@@ -184,6 +186,8 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
     L = config["data"]["signal_length"]
     z_dim = config["models"][model_type].get("z_dim", None)
     ddpm_steps = config["models"][model_type].get("T", 1000)
+    g = torch.Generator(device=device)
+    g.manual_seed(seed)
 
     if model_type == 'gan':
         checkpoint = torch.load(model_checkpoint, map_location=device)
@@ -193,7 +197,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
         G.eval()
 
         with torch.no_grad():
-            z = torch.randn(num_samples, z_dim, device=device)
+            z = torch.randn(num_samples, z_dim, device=device, generator=g)
             fake = G(z).cpu().numpy()
 
     # DCGAN: Generación directa a partir de ruido latente z
@@ -207,7 +211,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
 
         # Muestreo directo: x = G(z)
         with torch.no_grad():
-            z = torch.randn(num_samples, z_dim, device=device)
+            z = torch.randn(num_samples, z_dim, device=device, generator=g)
             fake = G(z).squeeze(1).cpu().numpy()
 
     # WGAN-GP
@@ -219,7 +223,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
         G.eval()
 
         with torch.no_grad():
-            z = torch.randn(num_samples, z_dim, device=device)
+            z = torch.randn(num_samples, z_dim, device=device, generator=g)
             fake = G(z).cpu().numpy()
 
     # DDPM: generación mediante proceso inverso de difusión
@@ -237,7 +241,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
 
         with torch.no_grad():
             # Inicialización desde ruido gaussiano puro
-            x = torch.randn(num_samples, 2, L, device=device)
+            x = torch.randn(num_samples, 2, L, device=device, generator=g)
 
             # Proceso inverso de difusión: eliminar ruido paso a paso
             # desde t=T-1 hasta t=0
@@ -247,7 +251,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
 
                 beta = ddpm.betas[t]
                 if t > 0:
-                    z = torch.randn_like(x)
+                    z = torch.randn_like(x, generator=g)
                 else:
                     z = torch.zeros_like(x)
 
@@ -289,13 +293,22 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
 
     return fake
 
-def main(args, config):
-    seed = config["experiment"]["seed"]
+def set_seed(seed):
+    import random
+    random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def main(args, config):
+    seed = config["experiment"]["seed"]
+    set_seed(seed)
 
     print("\n=== Cargando datos ===")
-    real_eval = load_real_data(args.data, args.num_eval)
+    real_eval = load_real_data(args.data, args.num_eval, seed)
     print("Dataset cargado:", real_eval.shape)
 
     print(f"\n=== Generando señales con {args.model_type.upper()} ===")
@@ -307,10 +320,28 @@ def main(args, config):
         model_checkpoint=args.model,
         num_samples=args.num_eval,
         device=args.device,
-        model_bundle=model_bundle
+        model_bundle=model_bundle,
+        seed=seed
     )
 
     print("Señales generadas:", fake_eval.shape)
+
+    # convertir a canal complejo
+    h_real = real_eval[:, 0, :] + 1j*real_eval[:, 1, :]
+    h_fake = fake_eval[:, 0, :] + 1j*fake_eval[:, 1, :]
+
+    # número de bits (QPSK = 2 bits por símbolo)
+    num_bits = 2 * h_real.__sizeof__()
+
+    bits = np.random.randint(0, 2, num_bits)
+
+    ber_real = compute_ber(h_real, bits, snr_db=10)
+    ber_fake = compute_ber(h_fake, bits, snr_db=10)
+
+    print("\n--- BER ---")
+    print(f"BER real: {ber_real:.6f}")
+    print(f"BER fake: {ber_fake:.6f}")
+    print(f"BER diff: {abs(ber_real - ber_fake):.6f}")
 
     real_mag, fake_mag = to_magnitude(real_eval, fake_eval)
 
@@ -318,14 +349,15 @@ def main(args, config):
     print_metrics(metrics)
     print_physical_metrics(metrics)
     save_metrics(args, metrics)
-    write_metrics_file(args, metrics)
+    write_metrics_file(args, metrics, ber_real, ber_fake)
     plot_results(args, metrics, real_mag, fake_mag)
 
     return metrics
 
-def load_real_data(path, num_eval):
+def load_real_data(path, num_eval, seed=42):
     data = np.load(path).astype(np.float32)
-    idx = np.random.choice(len(data), num_eval, replace=False)
+    rng = np.random.RandomState(seed)
+    idx = rng.choice(len(data), num_eval, replace=False)
     return data[idx]
 
 def to_magnitude(real_eval, fake_eval):
@@ -369,7 +401,7 @@ def save_metrics(args, metrics):
     os.makedirs(args.save_dir, exist_ok=True)
     np.save(os.path.join(args.save_dir, "metrics.npy"), metrics)
 
-def write_metrics_file(args, metrics):
+def write_metrics_file(args, metrics, ber_real=None, ber_fake=None):
     scalar_keys = [
         'pdp_mae', 'pdp_mae_db',
         'avg_delay_mae_ns', 'rms_mae_ns',
@@ -415,6 +447,11 @@ def write_metrics_file(args, metrics):
         f.write(f"Avg delay fake: {metrics['avg_fake'] * 1e9:.3f} ns\n")
         f.write(f"RMS delay fake: {metrics['rms_fake'] * 1e9:.3f} ns\n")
         f.write(f"Mean PSD fake: {np.mean(metrics['psd_fake_db']):.3f} dB/Hz\n")
+
+        f.write("\n---- BER ----\n")
+        f.write(f"BER real: {ber_real:.6f}\n")
+        f.write(f"BER fake: {ber_fake:.6f}\n")
+        f.write(f"BER diff: {abs(ber_real - ber_fake):.6f}\n")
 
         f.write("\n---- STATISTICAL INTERPRETATION ----\n")
         f.write(f"RMS comparison: {significance(metrics['rms_t_pvalue'])}\n")
@@ -480,23 +517,16 @@ if __name__ == "__main__":
 
     base_save_dir = config["paths"]["eval"]["base_dir"]
 
-    if args.model_type == "gan":
-        args.save_dir = os.path.join(base_save_dir, "GAN_Conv1D")
+    # carpeta del experimento
+    experiment_name = os.path.basename(
+        os.path.dirname(args.model)
+    )
 
-    elif args.model_type == "dcgan":
-        args.save_dir = os.path.join(base_save_dir, "DCGAN_Conv1D")
-
-    elif args.model_type == "wgan":
-        args.save_dir = os.path.join(base_save_dir, "WGAN_Conv1D")
-
-    elif args.model_type == "ddpm":
-        args.save_dir = os.path.join(base_save_dir, "DDPM_Conv1D")
-
-    elif args.model_type == "ddim":
-        args.save_dir = os.path.join(base_save_dir, "DDIM_Conv1D")
-
-    else:
-        raise ValueError("model_type inválido")
+    args.save_dir = os.path.join(
+        base_save_dir,
+        args.model_type.upper(),
+        experiment_name
+    )
 
     os.makedirs(args.save_dir, exist_ok=True)
 
