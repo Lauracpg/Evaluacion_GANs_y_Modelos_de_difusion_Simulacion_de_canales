@@ -1,0 +1,36 @@
+===== RESULTADOS EVALUACION =====
+Model type: ddpm
+Checkpoint: checkpoints/datos_loopback/ddpm/best_model.pth
+Num eval samples: 500
+==================================================
+
+---- METRICAS GLOBALES ----
+pdp_mae: 0.001179
+pdp_mae_db: 0.080 dB
+avg_delay_mae_ns: 2.060 ns
+rms_mae_ns: 1.049 ns
+std_mae: 0.002566
+autocorr_mae: 0.038913
+psd_mae: 0.000047
+psd_mae_db: 3.722 dB/Hz
+
+---- STATISTICAL TESTS ----
+RMS t-test statistic: 6.149722
+RMS t-test p_value: 1.269e-09
+AVG delay t-test statistic: -1.911082
+AVG delay t-test p_value: 5.652e-02
+
+---- REAL CHANNEL STATS ----
+Avg delay real: 958.816 ns
+RMS delay real: 594.527 ns
+Mean PSD real: -46.715 dB/Hz
+
+---- GENERATED CHANNEL STATS ----
+Avg delay fake: 960.876 ns
+RMS delay fake: 593.478 ns
+Mean PSD fake: -43.488 dB/Hz
+
+
+---- STATISTICAL INTERPRETATION ----
+RMS comparison: STATISTICALLY DIFFERENT
+AVG delay comparison: STATISTICALLY SIMILAR
