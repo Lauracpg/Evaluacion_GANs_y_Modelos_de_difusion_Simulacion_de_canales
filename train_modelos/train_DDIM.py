@@ -13,9 +13,6 @@ def load_config(path="dm_config.json"):
 
 # Denoising diffusion implicit model DDIM
 
-# Extrae características locales de la señal 1D
-# GroupNorm estabiliza el entrenamiento
-# SiLU introduce no linealidad suave
 class ConvBlock(nn.Module):
     def __init__(self, in_c, out_c):
         super().__init__()
@@ -31,10 +28,6 @@ class ConvBlock(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-# Convierte el timestep t en un vector numérico continuo
-# el modelo necesita saber cuánto ruido hay en la señal
-# se usa codificación sinusoidal: sin(wt), cos(wt)
-# que permite representar cualquier paso de difusión de forma suave
 class TimeEmbedding(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -52,11 +45,6 @@ class TimeEmbedding(nn.Module):
         emb = torch.cat([emb.sin(), emb.cos()], dim=1)
         return emb
 
-# encoder-decoder con skip connections:
-# reduce dimensión -> aprende estrutura global
-# recupera dimensión -> reconstruye señal
-# entrada: señal ruidosa xt
-# salida: ruido estimado epsilon
 class UNet1D(nn.Module):
     def __init__(self, time_emb_dim=64):
         super().__init__()
@@ -109,10 +97,6 @@ class UNet1D(nn.Module):
         return self.final(x)
 
 # SCHEDULE DE RUIDO
-# define cuánto ruido se añade en cada paso t
-# beta_t = varianza del ruido añadido en el paso t
-# cosine schedule: añade poco ruido al principio, añade más ruido al final.
-# Mejora estabilidad frente a schedule lineal
 def cosine_beta_schedule(T):
     s = 0.008
     steps = T + 1
@@ -144,8 +128,6 @@ def compute_rms_torch(x, delta_tau=1e-8):
 
     return rms
 
-# implementa el proceso forward: q(xt | x0)
-# añade ruido progresivamente a la señal
 class Diffusion(nn.Module):
     def __init__(self, model, T=1000, data=None, lambda_rms=1.0):
         super().__init__()
@@ -222,9 +204,7 @@ class Diffusion(nn.Module):
 
         return loss_noise + self.lambda_rms * loss_rms
 
-# genera nuevas señales a partir de ruido puro
-# DDIm permite usar menos pasos
-# usa una ecuación determinista
+# Generar nuevas señales a partir de ruido puro
 class DDIMSampler:
     def __init__(self, diffusion, eta=0.0):
         self.model = diffusion.model
