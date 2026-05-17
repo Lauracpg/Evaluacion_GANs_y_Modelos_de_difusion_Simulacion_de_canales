@@ -1,0 +1,40 @@
+===== RESULTADOS EVALUACION =====
+Model type: gan
+Checkpoint: checkpoints/datos_loopback/sweep_gan/gan_z128_lr0.0001_bs32/best_model.pth
+Num eval samples: 500
+==================================================
+
+---- METRICAS GLOBALES ----
+pdp_mae: 0.001673
+pdp_mae_db: 0.115 dB
+avg_delay_mae_ns: 11.176 ns
+rms_mae_ns: 2.854 ns
+std_mae: 0.008306
+autocorr_mae: 0.058057
+psd_mae: 0.000030
+psd_mae_db: 3.370 dB/Hz
+
+---- STATISTICAL TESTS ----
+RMS t-test statistic: 15.648370
+RMS t-test p_value: 8.596e-49
+AVG delay t-test statistic: 10.338949
+AVG delay t-test p_value: 5.221e-23
+
+---- REAL CHANNEL STATS ----
+Avg delay real: 958.816 ns
+RMS delay real: 594.527 ns
+Mean PSD real: -46.715 dB/Hz
+
+---- GENERATED CHANNEL STATS ----
+Avg delay fake: 947.640 ns
+RMS delay fake: 591.673 ns
+Mean PSD fake: -48.658 dB/Hz
+
+---- BER ----
+BER real: 0.454920
+BER fake: 0.451125
+BER diff: 0.003795
+
+---- STATISTICAL INTERPRETATION ----
+RMS comparison: STATISTICALLY DIFFERENT
+AVG delay comparison: STATISTICALLY DIFFERENT

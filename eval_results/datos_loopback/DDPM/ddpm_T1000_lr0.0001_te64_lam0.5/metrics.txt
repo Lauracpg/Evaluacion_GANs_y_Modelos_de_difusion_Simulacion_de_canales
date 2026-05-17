@@ -1,0 +1,40 @@
+===== RESULTADOS EVALUACION =====
+Model type: ddpm
+Checkpoint: checkpoints/sweep_dm/ddpm_T1000_lr0.0001_te64_lam0.5/best_model.pth
+Num eval samples: 500
+==================================================
+
+---- METRICAS GLOBALES ----
+pdp_mae: 0.170389
+pdp_mae_db: 5.614 dB
+avg_delay_mae_ns: 7.245 ns
+rms_mae_ns: 3.741 ns
+std_mae: 0.317399
+autocorr_mae: 0.067238
+psd_mae: 0.000934
+psd_mae_db: 15.969 dB/Hz
+
+---- STATISTICAL TESTS ----
+RMS t-test statistic: 12.560924
+RMS t-test p_value: 3.386e-33
+AVG delay t-test statistic: -6.035633
+AVG delay t-test p_value: 2.462e-09
+
+---- REAL CHANNEL STATS ----
+Avg delay real: 958.816 ns
+RMS delay real: 594.527 ns
+Mean PSD real: -46.715 dB/Hz
+
+---- GENERATED CHANNEL STATS ----
+Avg delay fake: 966.061 ns
+RMS delay fake: 590.786 ns
+Mean PSD fake: -30.746 dB/Hz
+
+---- BER ----
+BER real: 0.454920
+BER fake: 0.449690
+BER diff: 0.005230
+
+---- STATISTICAL INTERPRETATION ----
+RMS comparison: STATISTICALLY DIFFERENT
+AVG delay comparison: STATISTICALLY DIFFERENT

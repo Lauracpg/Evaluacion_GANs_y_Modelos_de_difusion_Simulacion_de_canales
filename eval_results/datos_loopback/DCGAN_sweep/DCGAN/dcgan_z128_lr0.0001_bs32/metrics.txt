@@ -1,0 +1,40 @@
+===== RESULTADOS EVALUACION =====
+Model type: dcgan
+Checkpoint: checkpoints/datos_loopback/sweep_dcgan/dcgan_z128_lr0.0001_bs32/model_best.pth
+Num eval samples: 500
+==================================================
+
+---- METRICAS GLOBALES ----
+pdp_mae: 0.000657
+pdp_mae_db: 0.043 dB
+avg_delay_mae_ns: 1.412 ns
+rms_mae_ns: 0.335 ns
+std_mae: 0.004234
+autocorr_mae: 0.013086
+psd_mae: 0.000112
+psd_mae_db: 5.681 dB/Hz
+
+---- STATISTICAL TESTS ----
+RMS t-test statistic: 1.612210
+RMS t-test p_value: 1.072e-01
+AVG delay t-test statistic: -1.268057
+AVG delay t-test p_value: 2.053e-01
+
+---- REAL CHANNEL STATS ----
+Avg delay real: 958.816 ns
+RMS delay real: 594.527 ns
+Mean PSD real: -46.715 dB/Hz
+
+---- GENERATED CHANNEL STATS ----
+Avg delay fake: 960.228 ns
+RMS delay fake: 594.192 ns
+Mean PSD fake: -41.116 dB/Hz
+
+---- BER ----
+BER real: 0.454920
+BER fake: 0.444335
+BER diff: 0.010585
+
+---- STATISTICAL INTERPRETATION ----
+RMS comparison: STATISTICALLY SIMILAR
+AVG delay comparison: STATISTICALLY SIMILAR

@@ -1,0 +1,14 @@
+{
+  "experiment": {
+    "model_type": ["wgan"]
+  },
+
+  "model": {
+    "z_dim": [64, 128]
+  },
+
+  "training": {
+    "lr": [0.00005, 0.0001],
+    "batch_size": [32, 64]
+  }
+}

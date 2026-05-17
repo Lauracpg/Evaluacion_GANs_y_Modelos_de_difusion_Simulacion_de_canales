@@ -10,14 +10,15 @@
   },
 
   "model": {
-    "z_dim": 128,
+    "z_dim": 64,
     "signal_length": 200
   },
 
   "training": {
-    "epochs": 800,
+    "epochs": 500,
     "batch_size": 64,
     "lr": 0.00005,
+
     "gan": {
       "betas": [0.5, 0.999]
     },
@@ -27,11 +28,12 @@
       "n_critic": 5,
       "lambda_gp": 10.0
     },
-    "patience": 120,
+    "patience": 80,
     "min_delta": 0.0001
   },
 
   "loss": {
+    "type": "mse",
     "gan": "bce",
     "wgan": "wgan_gp"
   },
