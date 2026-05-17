@@ -1,5 +1,4 @@
 import json
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,14 +14,10 @@ def load_config(path="dm_config.json"):
 # Denoising diffusion probabilistic model DDPM
 class ConvBlock(nn.Module):
     """
-    Bloque convolucional 1D básico usado en la U-Net.
-    Extrae patrones locales de la señal (estructura temporal)
-    Mantiene la longitud usando padding=1
+    Bloque básico Conv1D para la U-Net
     """
     def __init__(self, in_c, out_c):
         super().__init__()
-        # dos convoluciones 1D consecutivas
-        # kernel_size=3 y padding=1 preservan la longitud de la señal
         self.net = nn.Sequential(
             nn.Conv1d(in_c, out_c, 3, padding=1),
             nn.GroupNorm(min(8, out_c), num_channels=out_c),  # normalización estable para batch pequeños
@@ -33,21 +28,15 @@ class ConvBlock(nn.Module):
         )
 
     def forward(self, x):
-        # x: (batch, channels, length)
         return self.net(x)
 
 class TimeEmbedding(nn.Module):
-    # Convierte el timestep t en un vector continuo
-    # Permite al modelo saber el nivel de ruido
+    """Embedding sinusoidal del timestep"""
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
 
     def forward(self, t):
-        """
-         t: tensor de forma (batch,)
-            representa el paso de difusión (nivel de ruido)
-        """
         half = self.dim // 2
         # Frecuencias logarítmicamente espaciadas
         emb = math.log(10000) / (half - 1)
@@ -59,12 +48,6 @@ class TimeEmbedding(nn.Module):
         return emb
 
 class UNet1D(nn.Module):
-    """
-    U-Net 1D simplificada para modelar señales de canal.
-
-    El modelo aprende a predecir el ruido ε añadido a la señal
-    en un determinado timestep t.
-    """
     def __init__(self, time_emb_dim=64):
         super().__init__()
         # MLP que transforma el timestep t en un embedding
@@ -89,19 +72,15 @@ class UNet1D(nn.Module):
         self.final = nn.Conv1d(64, 2, 1)
 
     def forward(self, x, t):
-        """
-        x: señal ruidosa x_t -> (batch, 1, L)
-        t: timestep / nivel de ruido -> (batch,)
-        """
         # Encoder
         x1 = self.down1(x) # características finas
         x2 = self.down2(self.pool(x1)) # características más globales
-        # Bottleneck
-        x_mid = self.mid(self.pool(x2)) # representación central
+
+        # Bottleneck + time conditioning
+        x_mid = self.mid(self.pool(x2))
         # expandir embeddings temporal a la dimensión temporal de x_mid
         t_emb = self.time_mlp(t).unsqueeze(-1)
         t_emb = t_emb.expand(-1, -1, x_mid.size(2))
-        # Inyección del tiempo (condicionamiento temporal)
         x_mid = x_mid + t_emb
 
         # Decoder: reconstrucción progresiva
@@ -110,14 +89,13 @@ class UNet1D(nn.Module):
 
         x = F.interpolate(x, size=x1.shape[-1])
         x = self.up2(torch.cat([x, x1], dim=1))
+
         # predicción final del ruido ε
         return self.final(x)
 
 def cosine_beta_schedule(T):
     """
-    Cosine noise schedule propuesto por Nichol & Dhariwal (2021).
     Define cuánto ruido se añade en cada paso de difusión.
-    Produce un proceso más estable que el schedule lineal.
     """
     s = 0.008
     steps = T + 1
@@ -130,9 +108,6 @@ def cosine_beta_schedule(T):
 
 class DDPM(nn.Module):
     """
-    Implementación básica de DDPM para señales 1D.
-
-    Encapsula:
     - proceso forward (añadir ruido)
     - función de pérdida
     """
@@ -153,8 +128,6 @@ class DDPM(nn.Module):
     def q_sample(self, x0, t, noise):
         """
         Aplicar el proceso forward:
-        x_t = sqrt(alpha_bar_t) * x_0 +
-            sqrt(1 - alpha_bar_t) * ε
         """
         # Añade ruido a la señal original según el timestep t
         # x_t = mezcla de señal limpia + ruido
@@ -165,11 +138,7 @@ class DDPM(nn.Module):
 
     def loss(self, x0):
         """
-        Función de pérdida:
-        1. Elegir un timestep t aleatorio
-        2. Añadir ruido gaussiano a la señal
-        3. Predecir el ruido con la U-Net
-        4. Minimizar MSE entre ruido y real
+        Función de pérdida
         """
         b = x0.size(0)
         # timestep aleatorio por muestra
