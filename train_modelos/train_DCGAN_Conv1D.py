@@ -11,12 +11,11 @@ def load_config(path="gans_config.json"):
     with open(path, "r") as f:
         return json.load(f)
 
-# ----- GENERATOR Conv1D ----- #
+# ----- GENERATOR ----- #
 class Generator(nn.Module):
     def __init__(self, z_dim, L):
         super().__init__()
         self.init_len = L // 8
-        # Proyección del ruido a un espacio estructurado inicial
         self.fc = nn.Linear(z_dim, 128 * self.init_len)
         self.net = nn.Sequential(
             nn.BatchNorm1d(128),
@@ -43,7 +42,7 @@ class Generator(nn.Module):
         x = self.net(x)
         return x
 
-# ----- DISCRIMINATOR Conv1D ----- #
+# ----- DISCRIMINATOR ----- #
 class Discriminator(nn.Module):
     def __init__(self, L):
         super().__init__()
@@ -65,7 +64,7 @@ class Discriminator(nn.Module):
         f = f.view(x.size(0), -1)
         return self.fc(f)
 
-### Inicialización DCGAN ###
+### Inicialización ###
 def weights_init(m):
     if isinstance(m, (nn.Conv1d, nn.ConvTranspose1d, nn.Linear)):
         nn.init.normal_(m.weight, 0.0, 0.02)
@@ -104,11 +103,6 @@ def train_gan(G, D, loader, device, config):
     epochs_no_improve = 0
 
     ### Bucle del ENTRENAMIENTO principal ###
-    # en cada iter:
-    #   - entrenar primero discriminador (D)
-    #   - luego el generador (G)
-    #   - guardar las pérdidas promedio por época
-
     for epoch in range(1, epochs + 1):
         g_loss_avg = 0.0
         d_loss_avg = 0.0
