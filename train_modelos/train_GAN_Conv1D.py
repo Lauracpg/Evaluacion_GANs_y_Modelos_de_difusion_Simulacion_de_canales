@@ -10,7 +10,7 @@ def load_config(path="gans_config.json"):
     with open(path, "r") as f:
         return json.load(f)
 
-# ----- GENERATOR Conv1D ----- #
+# ----- GENERATOR ----- #
 class Generator(nn.Module):
     def __init__(self, z_dim, L):
         super().__init__()
@@ -39,7 +39,7 @@ class Generator(nn.Module):
         # genera señal de canal sintético
         return self.net(x)
 
-# ----- DISCRIMINATOR Conv1D ----- #
+# ----- DISCRIMINATOR ----- #
 class Discriminator(nn.Module):
     def __init__(self, L):
         super().__init__()
@@ -98,9 +98,6 @@ def train_gan(G, D, loader, device, config):
     best_g_loss = float("inf")
 
     ### Bucle del ENTRENAMIENTO principal ###
-    # en cada iter:
-    #   - entrenar primero discriminador (D)
-    #   - luego el generador (G)
     for epoch in range(epochs):
         g_loss_epoch = 0.0
         d_loss_epoch = 0.0
@@ -141,7 +138,6 @@ def train_gan(G, D, loader, device, config):
             fake = G(z)
 
             # El generador intenta engañar al discriminador:
-            # quiere que D(fake) ≈ 1 (parezca real)
             pred_fake = D(fake)
             lossG = criterion(pred_fake, real_labels)
 
@@ -159,6 +155,7 @@ def train_gan(G, D, loader, device, config):
             f"Epoch [{epoch}/{epochs}] "
             f"G_loss: {g_loss_epoch:.4f} | D_loss: {d_loss_epoch:.4f}"
         )
+
         # Guardar mejor modelo (según pérdida del generador)
         if g_loss_epoch < best_g_loss:
             best_g_loss = g_loss_epoch
