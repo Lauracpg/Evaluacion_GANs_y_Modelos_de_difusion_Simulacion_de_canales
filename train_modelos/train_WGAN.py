@@ -10,7 +10,7 @@ def load_config(path="gans_config.json"):
     with open(path, "r") as f:
         return json.load(f)
 
-# ----- GENERATOR Conv1D ----- #
+# ----- GENERATOR ----- #
 class Generator(nn.Module):
     def __init__(self, z_dim, L):
         super().__init__()
@@ -78,7 +78,7 @@ class Discriminator(nn.Module):
         f = f.view(x.size(0), -1)
         return self.fc(f)
 
-### Inicialización WGAN ###
+### Inicialización ###
 def weights_init(m):
     if isinstance(m, (nn.Conv1d, nn.ConvTranspose1d, nn.Linear)):
         nn.init.normal_(m.weight, 0.0, 0.02)
@@ -172,7 +172,7 @@ def train_gan(G, C, loader, device, config):
                 loss_total.backward()
                 optC.step()
 
-            # después de entrenar el critic, usamos los mismo batch de real/fake para W_dist
+            # después de entrenar el critic, usamos los mismos batches de real/fake para W_dist
             with torch.no_grad():
                 z = torch.randn(bsize, model_cfg["z_dim"], device=device)
                 fake_for_wdist = G(z)
@@ -184,7 +184,6 @@ def train_gan(G, C, loader, device, config):
             fake = G(z)
 
             # El generador intenta aumentar el score del critic
-            # (hacer que el critic piense que son datos reales)
             loss_G = -C(fake).mean()
 
             optG.zero_grad()
