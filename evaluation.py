@@ -5,6 +5,7 @@ import os
 import matplotlib.pyplot as plt
 from scipy.signal import welch
 from scipy.stats import ttest_ind
+from scipy.stats import gaussian_kde
 
 import json
 import importlib
@@ -274,7 +275,10 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
         DDIMSampler = model_bundle["DDIMSampler"]
         checkpoint = torch.load(model_checkpoint, map_location=device)
 
-        unet = UNet1D().to(device)
+        unet = UNet1D(
+            time_emb_dim=config["models"]["ddim"]["time_emb_dim"]
+        ).to(device)
+
         unet.load_state_dict(checkpoint)
         unet.eval()
 
@@ -457,6 +461,115 @@ def write_metrics_file(args, metrics, ber_real=None, ber_fake=None):
         f.write(f"RMS comparison: {significance(metrics['rms_t_pvalue'])}\n")
         f.write(f"AVG delay comparison: {significance(metrics['avg_t_pvalue'])}\n")
 
+
+def plot_delay_distribution(args, metrics):
+    plt.figure(figsize=(8, 4))
+
+    plt.hist(
+        metrics["rms_real_all"] * 1e9,
+        bins=30,
+        alpha=0.6,
+        density=True,
+        label="Real"
+    )
+
+    plt.hist(
+        metrics["rms_fake_all"] * 1e9,
+        bins=30,
+        alpha=0.6,
+        density=True,
+        label="Generado"
+    )
+
+    plt.xlabel("RMS Delay Spread (ns)")
+    plt.ylabel("Density")
+    plt.title("Distribución RMS Delay Spread")
+    plt.legend()
+
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(args.save_dir, "rms_distribution.png")
+    )
+
+
+def plot_boxplot_delay(args, metrics):
+    plt.figure(figsize=(6, 4))
+
+    plt.boxplot([
+        metrics["rms_real_all"] * 1e9,
+        metrics["rms_fake_all"] * 1e9
+    ],
+    tick_labels=["Real", "Generado"])
+
+    plt.ylabel("RMS Delay Spread (ns)")
+    plt.title("Boxplot RMS Delay Spread")
+
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(args.save_dir, "boxplot_rms.png")
+    )
+
+
+def plot_cdf(args, real_mag, fake_mag):
+    real_vals = real_mag.flatten()
+    fake_vals = fake_mag.flatten()
+
+    real_sorted = np.sort(real_vals)
+    fake_sorted = np.sort(fake_vals)
+
+    real_cdf = np.arange(len(real_sorted)) / len(real_sorted)
+    fake_cdf = np.arange(len(fake_sorted)) / len(fake_sorted)
+
+    plt.figure(figsize=(8, 4))
+
+    plt.plot(real_sorted, real_cdf, label="Real")
+    plt.plot(fake_sorted, fake_cdf, label="Generado")
+
+    plt.xlabel("|h[n]|")
+    plt.ylabel("CDF")
+    plt.title("CDF de magnitudes")
+
+    plt.legend()
+
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(args.save_dir, "cdf_magnitudes.png")
+    )
+
+
+def plot_kde(args, real_mag, fake_mag):
+    real_vals = real_mag.flatten()
+    fake_vals = fake_mag.flatten()
+
+    kde_real = gaussian_kde(real_vals)
+    kde_fake = gaussian_kde(fake_vals)
+
+    x = np.linspace(
+        0,
+        max(real_vals.max(), fake_vals.max()),
+        500
+    )
+
+    plt.figure(figsize=(8, 4))
+
+    plt.plot(x, kde_real(x), label="Real")
+    plt.plot(x, kde_fake(x), label="Generado")
+
+    plt.xlabel("|h[n]|")
+    plt.ylabel("Density")
+    plt.title("Kernel Density Estimation")
+
+    plt.legend()
+
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(args.save_dir, "kde_distribution.png")
+    )
+
 def plot_results(args, metrics, real_mag, fake_mag):
     plt.figure(figsize=(8, 4))
     delays = np.arange(len(metrics['pdp_real_db'])) * args.delta_tau * 1e9
@@ -489,18 +602,45 @@ def plot_results(args, metrics, real_mag, fake_mag):
     plt.savefig(os.path.join(args.save_dir, "psd.png"))
 
     num_plot = min(8, args.num_eval)
-    plt.figure(figsize=(12, 6))
-    for i in range(num_plot):
-        plt.subplot(4, 2, i + 1)
-        plt.plot(real_mag[i], label='Real')
-        plt.plot(fake_mag[i], '--', label='Generado')
-        plt.xticks([])
-        plt.yticks([])
 
-    plt.suptitle(f"Comparación señales reales vs {args.model_type.upper()}")
-    plt.legend(loc='upper right', fontsize=8)
+    fig, axes = plt.subplots(4, 2, figsize=(12, 8))
+    axes = axes.flatten()
+
+    for i in range(num_plot):
+        axes[i].plot(real_mag[i], label='Real')
+        axes[i].plot(fake_mag[i], '--', label='Generado')
+
+        axes[i].set_title(f"Señal {i + 1}", fontsize=9)
+
+        # nombres de ejes
+        axes[i].set_xlabel("Tap index")
+        axes[i].set_ylabel("|h[n]|")
+
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+
+    # eliminar subplots vacíos si hay menos de 8
+    for j in range(num_plot, len(axes)):
+        fig.delaxes(axes[j])
+
+    fig.suptitle(
+        f"Comparación señales reales vs {args.model_type.upper()}",
+        fontsize=14
+    )
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='upper right')
+
     plt.tight_layout()
-    plt.savefig(os.path.join(args.save_dir, "real_vs_generada.png"))
+
+    plt.savefig(
+        os.path.join(args.save_dir, "real_vs_generada.png")
+    )
+
+    plot_delay_distribution(args, metrics)
+    plot_boxplot_delay(args, metrics)
+    plot_cdf(args, real_mag, fake_mag)
+    plot_kde(args, real_mag, fake_mag)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
