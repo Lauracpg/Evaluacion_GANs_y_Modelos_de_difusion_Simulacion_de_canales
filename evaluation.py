@@ -485,7 +485,7 @@ def plot_delay_distribution(args, metrics):
     plt.ylabel("Density")
     plt.title("Distribución RMS Delay Spread")
     plt.legend()
-
+    plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
     plt.savefig(
@@ -504,7 +504,7 @@ def plot_boxplot_delay(args, metrics):
 
     plt.ylabel("RMS Delay Spread (ns)")
     plt.title("Boxplot RMS Delay Spread")
-
+    plt.grid(True, axis='y', alpha=0.3)
     plt.tight_layout()
 
     plt.savefig(
@@ -524,9 +524,9 @@ def plot_cdf(args, real_mag, fake_mag):
 
     plt.figure(figsize=(8, 4))
 
-    plt.plot(real_sorted, real_cdf, label="Real")
-    plt.plot(fake_sorted, fake_cdf, label="Generado")
-
+    plt.plot(real_sorted, real_cdf, label="Real", linewidth=2)
+    plt.plot(fake_sorted, fake_cdf, label="Generado", linewidth=2, linestyle='--')
+    plt.grid(True, alpha=0.3)
     plt.xlabel("|h[n]|")
     plt.ylabel("CDF")
     plt.title("CDF de magnitudes")
@@ -555,9 +555,9 @@ def plot_kde(args, real_mag, fake_mag):
 
     plt.figure(figsize=(8, 4))
 
-    plt.plot(x, kde_real(x), label="Real")
-    plt.plot(x, kde_fake(x), label="Generado")
-
+    plt.plot(x, kde_real(x), label="Real", linewidth=2)
+    plt.plot(x, kde_fake(x), label="Generado", linewidth=2, linestyle='--')
+    plt.grid(True, alpha=0.3)
     plt.xlabel("|h[n]|")
     plt.ylabel("Density")
     plt.title("Kernel Density Estimation")
@@ -573,8 +573,29 @@ def plot_kde(args, real_mag, fake_mag):
 def plot_results(args, metrics, real_mag, fake_mag):
     plt.figure(figsize=(8, 4))
     delays = np.arange(len(metrics['pdp_real_db'])) * args.delta_tau * 1e9
-    plt.plot(delays, metrics['pdp_real_db'], label="Real")
-    plt.plot(delays, metrics['pdp_fake_db'], label="Generado")
+    stride = max(1, len(metrics['pdp_real_db']) // 15)
+
+    plt.plot(
+        delays,
+        metrics['pdp_real_db'],
+        label="Real",
+        linewidth=2,
+        marker='o',
+        markersize=4,
+        markevery=stride
+    )
+
+    plt.plot(
+        delays,
+        metrics['pdp_fake_db'],
+        label="Generado",
+        linewidth=2,
+        linestyle='--',
+        marker='x',
+        markersize=4,
+        markevery=stride
+    )
+    plt.grid(True, alpha=0.3)
     plt.title("PDP (dB) Real vs Generado")
     plt.xlabel("Delay (ns)")
     plt.ylabel("Power (dB)")
@@ -589,12 +610,35 @@ def plot_results(args, metrics, real_mag, fake_mag):
     plt.xlabel("|h[n]|")
     plt.ylabel("Probability Density")
     plt.legend()
+    plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(args.save_dir, "histograma.png"))
 
     plt.figure(figsize=(8, 4))
-    plt.plot(metrics['freqs'], metrics['psd_real_db'], label='Real')
-    plt.plot(metrics['freqs'], metrics['psd_fake_db'], label='Generado')
+    stride = max(1, len(metrics['freqs']) // 20)
+
+    plt.plot(
+        metrics['freqs'],
+        metrics['psd_real_db'],
+        label='Real',
+        linewidth=2,
+        marker='o',
+        markersize=3,
+        markevery=stride
+    )
+
+    plt.plot(
+        metrics['freqs'],
+        metrics['psd_fake_db'],
+        label='Generado',
+        linewidth=2,
+        linestyle='--',
+        marker='x',
+        markersize=3,
+        markevery=stride
+    )
+
+    plt.grid(True, alpha=0.3)
     plt.title("PSD (db/Hz) Real vs Generado")
     plt.xlabel("Frequency (Hz)")
     plt.legend()
@@ -607,17 +651,32 @@ def plot_results(args, metrics, real_mag, fake_mag):
     axes = axes.flatten()
 
     for i in range(num_plot):
-        axes[i].plot(real_mag[i], label='Real')
-        axes[i].plot(fake_mag[i], '--', label='Generado')
+        stride = max(1, len(real_mag[i]) // 20)
 
+        axes[i].plot(
+            real_mag[i],
+            label='Real',
+            linewidth=1.8,
+            marker='o',
+            markersize=3,
+            markevery=stride
+        )
+
+        axes[i].plot(
+            fake_mag[i],
+            label='Generado',
+            linewidth=1.8,
+            linestyle='--',
+            marker='x',
+            markersize=3,
+            markevery=stride
+        )
+
+        axes[i].grid(True, alpha=0.3)
         axes[i].set_title(f"Señal {i + 1}", fontsize=9)
-
-        # nombres de ejes
         axes[i].set_xlabel("Tap index")
         axes[i].set_ylabel("|h[n]|")
-
-        axes[i].set_xticks([])
-        axes[i].set_yticks([])
+        axes[i].tick_params(axis='both', labelsize=7)
 
     # eliminar subplots vacíos si hay menos de 8
     for j in range(num_plot, len(axes)):
