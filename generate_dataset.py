@@ -203,7 +203,7 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     if save_dir:
         plt.savefig(os.path.join(save_dir, "examples_real.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.close()
 
     plt.figure(figsize=(10, 4))
     for i in range(min(num_examples, N)):
@@ -215,7 +215,7 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     if save_dir:
         plt.savefig(os.path.join(save_dir, "examples_imag.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.close()
 
     # Histograma global de amplitudes
     plt.figure(figsize=(6, 4))
@@ -229,7 +229,7 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     if save_dir:
         plt.savefig(os.path.join(save_dir, "histogram_real_imag.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.close()
 
     # Magnitud
     magnitud = np.sqrt(real**2 + imag**2)
@@ -242,7 +242,7 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     if save_dir:
         plt.savefig(os.path.join(save_dir, "histogram_magnitud.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.close()
 
     # Perfil temporal medio del canal
     mean_real = real.mean(axis=0)
@@ -266,7 +266,7 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     if save_dir:
         plt.savefig(os.path.join(save_dir, "mean_real_profile.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.close()
 
     plt.figure(figsize=(8, 4))
     plt.plot(mean_imag, label="Media Imag")
@@ -283,7 +283,7 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     if save_dir:
         plt.savefig(os.path.join(save_dir, "mean_imag_profile.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.close()
 
     # Heatmap (magnitud)
     idx = np.random.choice(N, min(heatmap_channels, N), replace=False)
@@ -298,21 +298,21 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     if save_dir:
         plt.savefig(os.path.join(save_dir, "heatmap_magnitud.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.close()
 
     print("\nAnálisis completado.")
 
 if __name__ == "__main__":
-    # data = load_nist_data("data/datos_reales/NIST_Samples.mat", L=128, save_path="data/datos_reales/dataset_nist.npy")
+    data = load_nist_data("data/datos_reales/NIST_Samples.mat", L=128, save_path="data/datos_reales/dataset_nist.npy")
     # print("Shape:", data.shape)
 
-    data = load_synthetic_data(
-        "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
-        L=128,
-        save_path="data/datos_sinteticos/dataset_synthetic.npy"
-    )
+    # data = load_synthetic_data(
+    #     "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
+    #     L=128,
+    #     save_path="data/datos_sinteticos/dataset_synthetic.npy"
+    # )
 
-    # dataset = load_loopback_data(
+    # data = load_loopback_data(
     #     "data/datos_loopback/new_ch_time_worst.mat",
     #     L=200,
     #     save_path="data/datos_loopback/new_ch_time_worst.npy"
