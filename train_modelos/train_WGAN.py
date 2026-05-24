@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
 import json
+import torch.nn.functional as F
 
 def load_config(path="gans_config.json"):
     with open(path, "r") as f:
@@ -115,6 +116,20 @@ def gradient_penalty(critic, real, fake, device):
 def compute_pdp(x):
     return torch.mean(x ** 2, dim=0)
 
+# pérdida espectral psd
+def spectral_loss(real, fake):
+    real_psd = torch.log(torch.abs(torch.fft.rfft(real, dim=-1)) ** 2 + 1e-8)
+    fake_psd = torch.log(torch.abs(torch.fft.rfft(fake, dim=-1)) ** 2 + 1e-8)
+    return F.mse_loss(fake_psd, real_psd)
+
+# métrica de evaluación por época
+def psd_similarity(real, fake):
+    """MSE entre PSDs medianas en log-escala. Cuanto menor, mejor."""
+    with torch.no_grad():
+        real_psd = torch.log(torch.abs(torch.fft.rfft(real, dim=-1)) ** 2 + 1e-8).mean(dim=0)
+        fake_psd = torch.log(torch.abs(torch.fft.rfft(fake, dim=-1)) ** 2 + 1e-8).mean(dim=0)
+        return F.mse_loss(fake_psd, real_psd).item()
+
 def train_gan(G, C, loader, device, config):
     # El critic no clasifica, asigna una "energía" o score real-valued
     # Objetivo: aproximar la distancia entre distribuciones (Wasserstein)
@@ -128,6 +143,7 @@ def train_gan(G, C, loader, device, config):
     epochs = training["epochs"]
     n_critic = training["wgan"]["n_critic"]
     λ_gp = training["wgan"]["lambda_gp"]
+    λ_spec = training["wgan"].get("lambda_spec", 0.1)
     patience = training["patience"]
     min_delta = training["min_delta"]
 
@@ -136,7 +152,7 @@ def train_gan(G, C, loader, device, config):
     optC = torch.optim.Adam(C.parameters(), lr=lr, betas=betas)
     optG = torch.optim.Adam(G.parameters(), lr=lr, betas=betas)
 
-    best_w_dist = -float("inf")
+    best_psd_score = float("inf")
     epochs_no_improve = 0
 
     ### Bucle del ENTRENAMIENTO principal ###
@@ -144,6 +160,7 @@ def train_gan(G, C, loader, device, config):
         c_loss_epoch = 0.0
         g_loss_epoch = 0.0
         w_dist_epoch = 0.0
+        psd_score_epoch = 0.0
 
         for (real_batch,) in loader:
             real = real_batch.to(device)
@@ -183,12 +200,20 @@ def train_gan(G, C, loader, device, config):
             z = torch.randn(bsize, model_cfg["z_dim"], device=device)
             fake = G(z)
 
-            # El generador intenta aumentar el score del critic
-            loss_G = -C(fake).mean()
+            loss_adv = -C(fake).mean()
+            loss_spec = spectral_loss(real, fake)
+            loss_G = loss_adv + λ_spec * loss_spec
 
             optG.zero_grad()
             loss_G.backward()
             optG.step()
+
+            # métricas de monitoreo
+            with torch.no_grad():
+                z2 = torch.randn(bsize, model_cfg["z_dim"], device=device)
+                fake_eval = G(z2)
+                w_dist_epoch += (C(real).mean() - C(fake_eval).mean()).item()
+                psd_score_epoch += psd_similarity(real, fake_eval)
 
             c_loss_epoch += loss_C.item()
             g_loss_epoch += loss_G.item()
@@ -197,24 +222,27 @@ def train_gan(G, C, loader, device, config):
         c_loss_epoch /= len(loader)
         g_loss_epoch /= len(loader)
         w_dist_epoch /= len(loader)
+        psd_score_epoch /= len(loader)
 
         print(f"Epoch {epoch}/{epochs} | "
               f"W_dist={w_dist_epoch:.4f} | "
+              f"PSD_score={psd_score_epoch:.4f} | "
               f"C_loss={c_loss_epoch:.4f} | "
               f"G_loss={g_loss_epoch:.4f}")
 
-        if w_dist_epoch > best_w_dist + min_delta:
-            best_w_dist = w_dist_epoch
+        if psd_score_epoch < best_psd_score - min_delta:
+            best_psd_score = psd_score_epoch
             epochs_no_improve = 0
 
             torch.save({
                 'G': G.state_dict(),
                 'C': C.state_dict(),
                 'epoch': epoch,
-                'W_dist': best_w_dist
+                'psd_score': best_psd_score,
+                'W_dist': w_dist_epoch
             }, os.path.join(paths["save_dir"], paths["best_model"]))
 
-            print("Nuevo mejor modelo guardado")
+            print(f" Nuevo mejor modelo (PSD_score={best_psd_score:.4f})")
 
         else:
             epochs_no_improve += 1
