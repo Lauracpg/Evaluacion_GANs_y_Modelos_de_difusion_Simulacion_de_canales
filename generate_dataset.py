@@ -211,27 +211,31 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
         mag_plot  = mag_flat
         sufijo_titulo = ""
 
-    # Ejemplos de canales
-    plt.figure(figsize=(10, 4))
-    for i in range(min(num_examples, N)):
-        plt.plot(real[i], alpha=0.7)
-    plt.title("Ejemplos - Parte REAL")
-    plt.xlabel("Muestra temporal")
-    plt.ylabel("Amplitud")
-    plt.grid(alpha=0.3)
-    if save_dir:
-        plt.savefig(os.path.join(save_dir, "examples_real.png"), dpi=300, bbox_inches="tight")
-        plt.close()
+    # Ejemplos de canales (real e imaginario)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
-    plt.figure(figsize=(10, 4))
+    # Parte REAL
     for i in range(min(num_examples, N)):
-        plt.plot(imag[i], alpha=0.7)
-    plt.title("Ejemplos - Parte IMAGINARIA")
-    plt.xlabel("Muestra temporal")
-    plt.ylabel("Amplitud")
-    plt.grid(alpha=0.3)
+        axes[0].plot(real[i], alpha=0.7)
+
+    axes[0].set_title("Ejemplos - Parte REAL")
+    axes[0].set_xlabel("Muestra temporal")
+    axes[0].set_ylabel("Amplitud")
+    axes[0].grid(alpha=0.3)
+
+    # Parte IMAGINARIA
+    for i in range(min(num_examples, N)):
+        axes[1].plot(imag[i], alpha=0.7)
+
+    axes[1].set_title("Ejemplos - Parte IMAGINARIA")
+    axes[1].set_xlabel("Muestra temporal")
+    axes[1].set_ylabel("Amplitud")
+    axes[1].grid(alpha=0.3)
+
+    plt.tight_layout()
+
     if save_dir:
-        plt.savefig(os.path.join(save_dir, "examples_imag.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(os.path.join(save_dir, "examples_real_imag.png"), dpi=300, bbox_inches="tight")
         plt.close()
 
     # Histograma Real / Imag
