@@ -176,12 +176,12 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
     print(f"\nDataset guardado en: {save_path}")
     return dataset
 
-def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heatmap_channels=100):
+def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heatmap_channels=100, filtrar_zeros=False, eps=1e-6):
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
-    N, C, L = data.shape # C = 2
-    assert C==2, "El dataset debe tener 2 canales (real, imag)"
+    N, C, L = data.shape
+    assert C == 2, "El dataset debe tener 2 canales (real, imag)"
 
     print("\nDATASET ANALYSIS")
     print(f"Total de canales: {N}")
@@ -191,8 +191,27 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     real = data[:, 0, :]
     imag = data[:, 1, :]
+    magnitud = np.sqrt(real ** 2 + imag ** 2)
 
-    # Ejemplos de canales reales:
+    real_flat = real.flatten()
+    imag_flat = imag.flatten()
+    mag_flat  = magnitud.flatten()
+
+    # Máscara de taps activos (se usa solo si filtrar_zeros=True)
+    if filtrar_zeros:
+        mask = mag_flat > eps
+        real_plot = real_flat[mask]
+        imag_plot = imag_flat[mask]
+        mag_plot  = mag_flat[mask]
+        print(f"Taps activos: {mask.sum()} / {len(mask)} ({mask.mean() * 100:.2f}%)")
+        sufijo_titulo = " (taps activos)"
+    else:
+        real_plot = real_flat
+        imag_plot = imag_flat
+        mag_plot  = mag_flat
+        sufijo_titulo = ""
+
+    # Ejemplos de canales
     plt.figure(figsize=(10, 4))
     for i in range(min(num_examples, N)):
         plt.plot(real[i], alpha=0.7)
@@ -200,7 +219,6 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
     plt.xlabel("Muestra temporal")
     plt.ylabel("Amplitud")
     plt.grid(alpha=0.3)
-
     if save_dir:
         plt.savefig(os.path.join(save_dir, "examples_real.png"), dpi=300, bbox_inches="tight")
         plt.close()
@@ -212,110 +230,134 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
     plt.xlabel("Muestra temporal")
     plt.ylabel("Amplitud")
     plt.grid(alpha=0.3)
-
     if save_dir:
         plt.savefig(os.path.join(save_dir, "examples_imag.png"), dpi=300, bbox_inches="tight")
         plt.close()
 
-    # Histograma global de amplitudes
+    # Histograma Real / Imag
+    p_low  = np.percentile(real_plot, 0.5)
+    p_high = np.percentile(real_plot, 99.5)
     plt.figure(figsize=(6, 4))
-    plt.hist(real.flatten(), bins=100, density=True, alpha=0.6, label="Real")
-    plt.hist(imag.flatten(), bins=100, density=True, alpha=0.6, label="Imag")
-    plt.title("Distribución global Real / Imag")
+    plt.hist(real_plot, bins=100, density=True, alpha=0.6, label="Real", range=(p_low, p_high))
+    plt.hist(imag_plot, bins=100, density=True, alpha=0.6, label="Imag", range=(p_low, p_high))
+    plt.title(f"Distribución global Real / Imag{sufijo_titulo}")
     plt.xlabel("Valor normalizado")
     plt.ylabel("Densidad")
     plt.legend()
     plt.grid(alpha=0.3)
-
     if save_dir:
         plt.savefig(os.path.join(save_dir, "histogram_real_imag.png"), dpi=300, bbox_inches="tight")
         plt.close()
 
-    # Magnitud
-    magnitud = np.sqrt(real**2 + imag**2)
-    plt.figure(figsize=(6, 4))
-    plt.hist(magnitud.flatten(), bins=100, density=True, alpha=0.8)
-    plt.title("Distribución de la magnitud |H|")
-    plt.xlabel("Magnitud")
-    plt.ylabel("Densidad")
-    plt.grid(alpha=0.3)
+    # Histograma magnitud + perfil por tap
+    p1  = np.percentile(mag_plot, 1)
+    p99 = np.percentile(mag_plot, 99)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
+    axes[0].hist(mag_plot, bins=100, density=True, alpha=0.8, range=(p1, p99))
+    axes[0].set_title(f"Distribución de |H|{sufijo_titulo}")
+    axes[0].set_xlabel("Magnitud")
+    axes[0].set_ylabel("Densidad")
+    axes[0].grid(alpha=0.3)
+
+    mean_mag_per_tap = magnitud.mean(axis=0)
+    axes[1].plot(mean_mag_per_tap)
+    axes[1].set_title("Magnitud media por tap de retardo")
+    axes[1].set_xlabel("Tap (índice de retardo)")
+    axes[1].set_ylabel("Magnitud media")
+    axes[1].grid(alpha=0.3)
+    plt.tight_layout()
     if save_dir:
         plt.savefig(os.path.join(save_dir, "histogram_magnitud.png"), dpi=300, bbox_inches="tight")
         plt.close()
 
-    # Perfil temporal medio del canal
+    # Perfil temporal medio - ylim dinámico
     mean_real = real.mean(axis=0)
     std_real = real.std(axis=0)
-
     mean_imag = imag.mean(axis=0)
     std_imag = imag.std(axis=0)
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(mean_real, label="Media Real")
-    plt.fill_between(
-        np.arange(L),
-        mean_real - std_real,
-        mean_real + std_real,
-        alpha=0.3,
-    )
-    plt.title("Perfil temporal medio - Parte Real")
-    plt.xlabel("Muestra temporal")
-    plt.legend()
-    plt.grid(alpha=0.3)
+    # Rango Y dinámico: excluye outliers del tap dominante
+    y_zoom = np.percentile(np.abs(mean_real + std_real), 95) * 2
+    y_zoom = max(y_zoom, 0.01)  # mínimo razonable para canales muy planos
 
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+    for ax, mean, std, label in [
+        (axes[0], mean_real, std_real, "Media Real"),
+        (axes[1], mean_imag, std_imag, "Media Imag"),
+    ]:
+        ax.plot(mean, label=label)
+        ax.fill_between(np.arange(L), mean - std, mean + std, alpha=0.3)
+        ax.set_xlabel("Muestra temporal")
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+    axes[0].set_title("Perfil temporal medio - Parte Real")
+    axes[1].set_title("Perfil temporal medio - Parte Imaginaria")
+
+    # Solo aplicar zoom si el canal es sparse (hay tap dominante claro)
+    if filtrar_zeros:
+        axes[0].set_ylim(-y_zoom, y_zoom)
+        axes[1].set_ylim(-y_zoom, y_zoom)
+
+    plt.tight_layout()
     if save_dir:
-        plt.savefig(os.path.join(save_dir, "mean_real_profile.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(os.path.join(save_dir, "mean_profile.png"), dpi=300, bbox_inches="tight")
         plt.close()
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(mean_imag, label="Media Imag")
-    plt.fill_between(
-        np.arange(L),
-        mean_imag - std_imag,
-        mean_imag + std_imag,
-        alpha=0.3
-    )
-    plt.title("Perfil temporal medio - Parte Imaginaria")
-    plt.xlabel("Muestra temporal")
-    plt.legend()
-    plt.grid(alpha=0.3)
-
-    if save_dir:
-        plt.savefig(os.path.join(save_dir, "mean_imag_profile.png"), dpi=300, bbox_inches="tight")
-        plt.close()
-
-    # Heatmap (magnitud)
-    idx = np.random.choice(N, min(heatmap_channels, N), replace=False)
+    # Heatmap magnitud
+    idx    = np.random.choice(N, min(heatmap_channels, N), replace=False)
     subset = magnitud[idx]
-
     plt.figure(figsize=(8, 6))
     plt.imshow(subset, aspect="auto", cmap="viridis")
     plt.colorbar(label="Magnitud")
     plt.title(f"Heatmap de magnitud ({subset.shape[0]} canales)")
     plt.xlabel("Muestra temporal")
     plt.ylabel("Canal")
-
     if save_dir:
         plt.savefig(os.path.join(save_dir, "heatmap_magnitud.png"), dpi=300, bbox_inches="tight")
         plt.close()
 
     print("\nAnálisis completado.")
 
+
+def diagnostico_dataset(data, nombre="dataset"):
+    N, C, L = data.shape
+    real = data[:, 0, :]
+    imag = data[:, 1, :]
+    magnitud = np.sqrt(real ** 2 + imag ** 2)
+    mag_flat = magnitud.flatten()
+
+    print(f"\n=== {nombre} ===")
+    print(f"Shape: {data.shape}")
+    print(f"Min: {data.min():.4e} | Max: {data.max():.4e}")
+    print(f"Media magnitud: {mag_flat.mean():.4e}")
+    print(f"Mediana magnitud: {np.median(mag_flat):.4e}")
+    print(f"% valores < 1e-6: {(mag_flat < 1e-6).mean() * 100:.2f}%")
+    print(
+        f"p1={np.percentile(mag_flat, 1):.4e} | p50={np.percentile(mag_flat, 50):.4e} | p99={np.percentile(mag_flat, 99):.4e}")
+
 if __name__ == "__main__":
-    data = load_nist_data("data/datos_reales/NIST_Samples.mat", L=128, save_path="data/datos_reales/dataset_nist.npy")
-    # print("Shape:", data.shape)
+    data_sintetico = load_synthetic_data(
+        "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
+        L=128,
+        save_path="data/datos_sinteticos/dataset_synthetic.npy"
+    )
+    data_loopback = load_loopback_data(
+        "data/datos_loopback/new_ch_time_worst.mat",
+        L=200,
+        save_path="data/datos_loopback/new_ch_time_worst.npy"
+    )
+    data_nist = load_nist_data(
+        "data/datos_reales/NIST_Samples.mat",
+        L=128,
+        save_path="data/datos_reales/dataset_nist.npy"
+    )
 
-    # data = load_synthetic_data(
-    #     "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
-    #     L=128,
-    #     save_path="data/datos_sinteticos/dataset_synthetic.npy"
-    # )
+    diagnostico_dataset(data_sintetico, nombre="Sintético")
+    diagnostico_dataset(data_loopback,  nombre="Loopback")
+    diagnostico_dataset(data_nist,      nombre="NIST")
 
-    # data = load_loopback_data(
-    #     "data/datos_loopback/new_ch_time_worst.mat",
-    #     L=200,
-    #     save_path="data/datos_loopback/new_ch_time_worst.npy"
-    # )
-
-    analyze_dataset(data)
+    analyze_dataset(data_sintetico, save_dir="data/datos_sinteticos", filtrar_zeros=True,  eps=1e-6)
+    analyze_dataset(data_loopback,  save_dir="data/datos_loopback",   filtrar_zeros=False)
+    analyze_dataset(data_nist,      save_dir="data/datos_reales",     filtrar_zeros=True,  eps=1e-4)
