@@ -64,11 +64,6 @@ def load_synthetic_data(file_path, L=128, save_path="data/datos_sinteticos/TDL_D
     H_real = np.real(H)
     H_imag = np.imag(H)
 
-    # norm energética
-    # energy = np.sqrt(np.sum(H_real**2 + H_imag**2, axis=1, keepdims=True))
-    # H_real = H_real / (energy + 1e-12)
-    # H_imag = H_imag / (energy + 1e-12)
-
     dataset = np.stack([H_real, H_imag], axis=1).astype(np.float32)
     print("Shape dataset:", dataset.shape)
 
@@ -275,7 +270,7 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
         plt.savefig(os.path.join(save_dir, "histogram_magnitud.png"), dpi=300, bbox_inches="tight")
         plt.close()
 
-    # Perfil temporal medio - ylim dinámico
+    # Perfil temporal medio
     mean_real = real.mean(axis=0)
     std_real = real.std(axis=0)
     mean_imag = imag.mean(axis=0)
@@ -324,23 +319,6 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
 
     print("\nAnálisis completado.")
 
-
-def diagnostico_dataset(data, nombre="dataset"):
-    N, C, L = data.shape
-    real = data[:, 0, :]
-    imag = data[:, 1, :]
-    magnitud = np.sqrt(real ** 2 + imag ** 2)
-    mag_flat = magnitud.flatten()
-
-    print(f"\n=== {nombre} ===")
-    print(f"Shape: {data.shape}")
-    print(f"Min: {data.min():.4e} | Max: {data.max():.4e}")
-    print(f"Media magnitud: {mag_flat.mean():.4e}")
-    print(f"Mediana magnitud: {np.median(mag_flat):.4e}")
-    print(f"% valores < 1e-6: {(mag_flat < 1e-6).mean() * 100:.2f}%")
-    print(
-        f"p1={np.percentile(mag_flat, 1):.4e} | p50={np.percentile(mag_flat, 50):.4e} | p99={np.percentile(mag_flat, 99):.4e}")
-
 if __name__ == "__main__":
     data_sintetico = load_synthetic_data(
         "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
@@ -357,10 +335,6 @@ if __name__ == "__main__":
         L=128,
         save_path="data/datos_reales/dataset_nist.npy"
     )
-
-    diagnostico_dataset(data_sintetico, nombre="Sintético")
-    diagnostico_dataset(data_loopback,  nombre="Loopback")
-    diagnostico_dataset(data_nist,      nombre="NIST")
 
     analyze_dataset(data_sintetico, save_dir="data/datos_sinteticos", filtrar_zeros=True,  eps=1e-6)
     analyze_dataset(data_loopback,  save_dir="data/datos_loopback",   filtrar_zeros=False)
