@@ -82,11 +82,9 @@ def train_gan(G, D, loader, device, config):
     betas = training["gan"]["betas"]
 
     # Función de pérdida binaria (real vs falso)
-    loss_type = config["loss"]["type"]
+    loss_type = config["loss"]["gan"]
     if loss_type == "bce":
         criterion = nn.BCEWithLogitsLoss()
-    elif loss_type == "mse":
-        criterion = nn.MSELoss()
     else:
         raise ValueError(f"Tipo de pérdida desconocido: {loss_type}")
 

@@ -307,6 +307,21 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def save_generated_dataset(fake, args, config):
+    out_dir = os.path.join(args.save_dir, "dataset_generado")
+    os.makedirs(out_dir, exist_ok=True)
+
+    np.save(
+        os.path.join(out_dir, "h_generated.npy"),
+        fake.astype(np.float32)
+    )
+
+    with open(os.path.join(out_dir, "info.txt"), "w") as f:
+        f.write(f"model_type: {args.model_type}\n")
+        f.write(f"checkpoint: {args.model}\n")
+        f.write(f"samples: {args.num_eval}\n")
+        f.write(f"signal_length: {fake.shape[-1]}\n")
+
 def main(args, config):
     seed = config["experiment"]["seed"]
     set_seed(seed)
@@ -329,6 +344,7 @@ def main(args, config):
     )
 
     print("Señales generadas:", fake_eval.shape)
+    save_generated_dataset(fake_eval, args, config)
 
     # convertir a canal complejo
     h_real = real_eval[:, 0, :] + 1j*real_eval[:, 1, :]
