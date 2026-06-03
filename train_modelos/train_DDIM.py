@@ -129,13 +129,15 @@ def compute_rms_torch(x, delta_tau=1e-8):
     return rms
 
 class Diffusion(nn.Module):
-    def __init__(self, model, T=1000, data=None, lambda_rms=1.0):
+    def __init__(self, model, T=1000, data=None,
+                 lambda_rms=1.0, lambda_psd = 0.1):
         super().__init__()
         self.model = model
 
         # número total de pasos de difusión
         self.T = T
         self.lambda_rms = lambda_rms
+        self.lambda_psd = lambda_psd
 
         betas = cosine_beta_schedule(T)
         alphas = 1. - betas
@@ -193,16 +195,19 @@ class Diffusion(nn.Module):
         loss_noise = (weights * (noise_pred - noise) ** 2).mean()
 
         a_t = self.alpha_bar[t][:, None, None]
-
         x0_pred = (xt - torch.sqrt(1 - a_t) * noise_pred) / torch.sqrt(a_t + 1e-8)
-        #x0_pred = torch.clamp(x0_pred, -1, 1)
 
         rms_real = compute_rms_torch(x0)
         rms_pred = compute_rms_torch(x0_pred)
-
         loss_rms = torch.mean((rms_real - rms_pred) ** 2)
 
-        return loss_noise + self.lambda_rms * loss_rms
+        # pérdida espectral, penaliza desviaciones en PSD en log-escala
+        real_psd = torch.log(torch.abs(torch.fft.rfft(x0, dim=-1)) ** 2 + 1e-8)
+        pred_psd = torch.log(torch.abs(torch.fft.rfft(x0_pred, dim=-1)) ** 2 + 1e-8)
+        loss_psd = F.mse_loss(pred_psd, real_psd)
+
+        return loss_noise + self.lambda_rms * loss_rms + self.lambda_psd * loss_psd
+
 
 # Generar nuevas señales a partir de ruido puro
 class DDIMSampler:
@@ -285,7 +290,8 @@ def train(config_path):
         model,
         T=config["diffusion"]["T"],
         data=data_np,
-        lambda_rms=config["diffusion"]["lambda_rms"]
+        lambda_rms=config["diffusion"]["lambda_rms"],
+        lambda_psd = config["diffusion"].get("lambda_psd", 0.1)
     ).to(device)
 
     opt = torch.optim.Adam(
@@ -337,7 +343,3 @@ def train(config_path):
         if epochs_no_improve >= config["training"]["patience"]:
             print(f"\nEarly stopping")
             break
-
-        if epoch % 10 == 0:
-            torch.save(model.state_dict(),
-                       os.path.join(config["paths"]["save_dir"], f"model_{epoch}.pth"))
