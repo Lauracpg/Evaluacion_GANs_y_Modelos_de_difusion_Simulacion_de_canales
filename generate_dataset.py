@@ -89,11 +89,19 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
         print(" ", k)
 
     # extraer todas las matrices que empiezan por "h_"
-    channel_keys = [k for k in keys if k.startswith("h_")]
+    # channel_keys = [k for k in keys if k.startswith("h_")]
 
-    print("\nMatrices de canal encontradas:")
-    for ck in channel_keys:
-        print(" ", ck)
+    # print("\nMatrices de canal encontradas:")
+    # for ck in channel_keys:
+    #     print(" ", ck)
+
+    channel_keys = ["h_AAplant_5G"]
+
+    if channel_keys[0] not in keys:
+        raise ValueError(f"No se encontró {channel_keys[0]} en el archivo .mat")
+
+    print("\nMatriz de canal seleccionada:")
+    print(" ", channel_keys[0])
 
     all_channels = []
     total_channels = 0
@@ -320,22 +328,22 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
     print("\nAnálisis completado.")
 
 if __name__ == "__main__":
-    data_sintetico = load_synthetic_data(
-        "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
-        L=128,
-        save_path="data/datos_sinteticos/dataset_synthetic.npy"
-    )
-    data_loopback = load_loopback_data(
-        "data/datos_loopback/new_ch_time_worst.mat",
-        L=200,
-        save_path="data/datos_loopback/new_ch_time_worst.npy"
-    )
+    # data_sintetico = load_synthetic_data(
+    #     "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
+    #     L=128,
+    #     save_path="data/datos_sinteticos/dataset_synthetic.npy"
+    # )
+    # data_loopback = load_loopback_data(
+    #     "data/datos_loopback/new_ch_time_worst.mat",
+    #     L=200,
+    #     save_path="data/datos_loopback/new_ch_time_worst.npy"
+    # )
     data_nist = load_nist_data(
         "data/datos_reales/NIST_Samples.mat",
         L=128,
-        save_path="data/datos_reales/dataset_nist.npy"
+        save_path="data/datos_NIST/h_AAplant_5G/h_AAplant_5G.npy"
     )
 
-    analyze_dataset(data_sintetico, save_dir="data/datos_sinteticos", filtrar_zeros=True,  eps=1e-6)
-    analyze_dataset(data_loopback,  save_dir="data/datos_loopback",   filtrar_zeros=False)
-    analyze_dataset(data_nist,      save_dir="data/datos_reales",     filtrar_zeros=True,  eps=1e-4)
+    #analyze_dataset(data_sintetico, save_dir="data/datos_sinteticos", filtrar_zeros=True,  eps=1e-6)
+    #analyze_dataset(data_loopback,  save_dir="data/datos_loopback",   filtrar_zeros=False)
+    analyze_dataset(data_nist, save_dir="data/datos_NIST/h_AAplant_5G",     filtrar_zeros=True,  eps=1e-4)

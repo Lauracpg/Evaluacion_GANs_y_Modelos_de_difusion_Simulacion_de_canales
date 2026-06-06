@@ -130,7 +130,7 @@ def psd_similarity(real, fake):
         fake_psd = torch.log(torch.abs(torch.fft.rfft(fake, dim=-1)) ** 2 + 1e-8).mean(dim=0)
         return F.mse_loss(fake_psd, real_psd).item()
 
-def train_gan(G, C, loader, device, config):
+def train_gan(G, C, loader, device, config, start_epoch=1, best_psd_score=float("inf")):
     # El critic no clasifica, asigna una "energía" o score real-valued
     # Objetivo: aproximar la distancia entre distribuciones (Wasserstein)
     training = config["training"]
@@ -152,11 +152,10 @@ def train_gan(G, C, loader, device, config):
     optC = torch.optim.Adam(C.parameters(), lr=lr, betas=betas)
     optG = torch.optim.Adam(G.parameters(), lr=lr, betas=betas)
 
-    best_psd_score = float("inf")
     epochs_no_improve = 0
 
     ### Bucle del ENTRENAMIENTO principal ###
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         c_loss_epoch = 0.0
         g_loss_epoch = 0.0
         w_dist_epoch = 0.0
@@ -253,7 +252,6 @@ def train_gan(G, C, loader, device, config):
 
     print("Entrenamiento completado. Modelos guardados en", paths["save_dir"])
 
-
 def train(config_path):
     config = load_config(config_path)
     torch.manual_seed(config["experiment"]["seed"])
@@ -276,7 +274,47 @@ def train(config_path):
         config["model"]["signal_length"]
     ).to(device)
 
+    best_model_path = os.path.join(
+        config["paths"]["save_dir"],
+        config["paths"]["best_model"]
+    )
+
+    start_epoch = 1
+    best_psd_score = float("inf")
+
+    if os.path.exists(best_model_path):
+
+        print(f"Cargando modelo existente: {best_model_path}")
+
+        checkpoint = torch.load(
+            best_model_path,
+            map_location=device
+        )
+
+        G.load_state_dict(checkpoint["G"])
+        C.load_state_dict(checkpoint["C"])
+
+        start_epoch = checkpoint["epoch"] + 1
+        best_psd_score = checkpoint["psd_score"]
+
+        print(
+            f"Reanudando desde epoch {checkpoint['epoch']} "
+            f"(PSD={best_psd_score:.6f})"
+        )
+
+    else:
+        G.apply(weights_init)
+        C.apply(weights_init)
+
     G.apply(weights_init)
     C.apply(weights_init)
 
-    train_gan(G, C, loader, device, config)
+    train_gan(
+        G,
+        C,
+        loader,
+        device,
+        config,
+        start_epoch=start_epoch,
+        best_psd_score=best_psd_score
+    )
