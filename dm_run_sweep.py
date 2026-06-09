@@ -37,7 +37,6 @@ def build_experiment_name(cfg):
         f"_T{cfg['diffusion']['T']}"
         f"_lr{cfg['training']['lr']}"
         f"_te{cfg['model']['time_emb_dim']}"
-        f"_lam{cfg['diffusion']['lambda_rms']}"
     )
 
 if __name__ == "__main__":
@@ -54,7 +53,7 @@ if __name__ == "__main__":
 
         exp_name = build_experiment_name(cfg)
 
-        save_dir = f"checkpoints/sweep_dm/{exp_name}"
+        save_dir = f"checkpoints/datos_loopback/sweep_ddim_2/{exp_name}"
         os.makedirs(save_dir, exist_ok=True)
 
         done_flag = os.path.join(save_dir, "done.txt")

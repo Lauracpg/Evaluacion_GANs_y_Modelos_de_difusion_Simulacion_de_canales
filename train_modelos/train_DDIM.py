@@ -108,35 +108,14 @@ def cosine_beta_schedule(T):
     betas = 1 - (alphas[1:] / alphas[:-1])
     return torch.clip(betas, 0.0001, 0.999)
 
-def compute_rms_torch(x, delta_tau=1e-8):
-    # x: (B, 2, L)
-    real = x[:, 0, :]
-    imag = x[:, 1, :]
-    mag = torch.sqrt(real**2 + imag**2)
-
-    power = mag**2 # (B, L)
-
-    L =  power.size(1)
-    delays = torch.arange(L, device=x.device).float() * delta_tau
-
-    total_power = power.sum(dim=1, keepdim=True) + 1e-12
-    mean_delay = (power * delays).sum(dim=1, keepdim=True) / total_power
-
-    rms = torch.sqrt(
-        (power * (delays - mean_delay) ** 2).sum(dim=1) / total_power.squeeze()
-    )
-
-    return rms
-
 class Diffusion(nn.Module):
     def __init__(self, model, T=1000, data=None,
-                 lambda_rms=1.0, lambda_psd = 0.1):
+                 lambda_psd = 0.05):
         super().__init__()
         self.model = model
 
         # número total de pasos de difusión
         self.T = T
-        self.lambda_rms = lambda_rms
         self.lambda_psd = lambda_psd
 
         betas = cosine_beta_schedule(T)
@@ -159,7 +138,7 @@ class Diffusion(nn.Module):
         pdp = np.mean(mag ** 2, axis=0)  # (L,)
         pdp_norm = pdp / (pdp.max() + 1e-12)
 
-        tap_weights = 1.0 + 9.0 * pdp_norm
+        tap_weights = 1.0 + 2.0 * pdp_norm
         tap_weights = torch.tensor(tap_weights, dtype=torch.float32)
 
         self.register_buffer('tap_weights', tap_weights)
@@ -196,18 +175,18 @@ class Diffusion(nn.Module):
 
         a_t = self.alpha_bar[t][:, None, None]
         x0_pred = (xt - torch.sqrt(1 - a_t) * noise_pred) / torch.sqrt(a_t + 1e-8)
-
-        rms_real = compute_rms_torch(x0)
-        rms_pred = compute_rms_torch(x0_pred)
-        loss_rms = torch.mean((rms_real - rms_pred) ** 2)
+        x0_pred = torch.clamp(x0_pred, -1, 1)
 
         # pérdida espectral, penaliza desviaciones en PSD en log-escala
-        real_psd = torch.log(torch.abs(torch.fft.rfft(x0, dim=-1)) ** 2 + 1e-8)
-        pred_psd = torch.log(torch.abs(torch.fft.rfft(x0_pred, dim=-1)) ** 2 + 1e-8)
-        loss_psd = F.mse_loss(pred_psd, real_psd)
+        real_psd = torch.abs(torch.fft.rfft(x0, dim=-1)) ** 2
+        pred_psd = torch.abs(torch.fft.rfft(x0_pred, dim=-1)) ** 2
+        real_psd = real_psd / (real_psd.sum(dim=-1, keepdim=True) + 1e-8)
+        pred_psd = pred_psd / (pred_psd.sum(dim=-1, keepdim=True) + 1e-8)
+        loss_psd = F.mse_loss(torch.log1p(pred_psd), torch.log1p(real_psd))
 
-        return loss_noise + self.lambda_rms * loss_rms + self.lambda_psd * loss_psd
+        loss = loss_noise + self.lambda_psd * loss_psd
 
+        return loss
 
 # Generar nuevas señales a partir de ruido puro
 class DDIMSampler:
@@ -223,14 +202,12 @@ class DDIMSampler:
     def sample(self, shape, device, steps=50):
         # comenzar desde ruido gaussiano puro
         x = torch.randn(shape, device=device)
-
         # seleccionar subconjunto de timesteps
         time_steps = torch.linspace(self.T - 1, 0, steps, device=device).long()
 
         for i in range(len(time_steps) - 1):
             t = time_steps[i]
             t_next = time_steps[i + 1]
-
             t_batch = torch.full((shape[0],), t, device=device)
 
             # estimar ruido presente en la señal
@@ -241,7 +218,7 @@ class DDIMSampler:
 
             # estimación de la señal limpia x0 = (xt - ruido) / escala
             x0_pred = (x - torch.sqrt(1 - a_t) * eps) / torch.sqrt(a_t + 1e-8)
-            x0_pred = torch.clamp(x0_pred, -1, 1)
+            x0_pred = torch.clamp(x0_pred, -1.0, 1.0)
 
             # controla cantidad de ruido extra
             sigma = self.eta * torch.sqrt(
@@ -253,9 +230,9 @@ class DDIMSampler:
 
             # ecuación DDIM: combina señal estimada limpia, dirección del ruido y ruido opcional
             x = (
-                    torch.sqrt(a_next) * x0_pred +
-                    torch.sqrt(torch.clamp(1 - a_next - sigma ** 2, min=0)) * eps +
-                    sigma * noise
+                torch.sqrt(a_next) * x0_pred +
+                torch.sqrt(torch.clamp(1 - a_next - sigma ** 2, min=0)) * eps +
+                sigma * noise
             )
 
         # último paso: señal limpia
@@ -265,8 +242,9 @@ class DDIMSampler:
         eps = self.model(x, t_batch)
         a_t = self.alpha_bar[t_last].view(1, 1, 1)
         x0_final = (x - torch.sqrt(1 - a_t) * eps) / torch.sqrt(a_t + 1e-8)
+        x0_final = torch.clamp(x0_final, -1.0, 1.0)
 
-        return torch.clamp(x0_final, -1, 1)
+        return x0_final
 
 def train(config_path):
     config = load_config(config_path)
@@ -275,6 +253,7 @@ def train(config_path):
     os.makedirs(config["paths"]["save_dir"], exist_ok=True)
 
     data_np = np.load(config["dataset"]["path"])
+
     data = torch.from_numpy(data_np).float()
 
     loader = DataLoader(
@@ -290,8 +269,7 @@ def train(config_path):
         model,
         T=config["diffusion"]["T"],
         data=data_np,
-        lambda_rms=config["diffusion"]["lambda_rms"],
-        lambda_psd = config["diffusion"].get("lambda_psd", 0.1)
+        lambda_psd = config["diffusion"].get("lambda_psd", 0.05),
     ).to(device)
 
     opt = torch.optim.Adam(
@@ -330,16 +308,22 @@ def train(config_path):
             best_loss = loss_avg
             epochs_no_improve = 0
 
-            torch.save(
-                model.state_dict(),
-                os.path.join(
-                    config["paths"]["save_dir"],
-                    config["paths"]["best_model"]
-                )
+            save_path = os.path.join(
+                config["paths"]["save_dir"],
+                config["paths"]["best_model"]
             )
+
+            torch.save(model.state_dict(), save_path)
+            print(f"Nuevo mejor modelo guardado | epoch {epoch} | loss {loss_avg:.6f} -> {save_path}")
         else:
             epochs_no_improve += 1
 
         if epochs_no_improve >= config["training"]["patience"]:
             print(f"\nEarly stopping")
             break
+
+
+if __name__ == "__main__":
+    import sys
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/dm_config.json"
+    train(config_path)

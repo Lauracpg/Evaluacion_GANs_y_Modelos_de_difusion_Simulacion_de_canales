@@ -33,37 +33,74 @@ def add_awgn(signal, snr_db):
     # Señal + ruido
     return signal + noise
 
-def compute_ber(h, bits, snr_db=10):
-    """
-    Simula transmisión QPSK sobre un canal complejo
-    y calcula tasa de error de bits (BER)
-    """
+def compute_ber(h, bits, mod_type="QPSK"):
+    N, L = h.shape
 
-    N, L = h.shape # número de señales y taps
-
-    # 1. Mapear bits a símbolos QPSK
-    x = qpsk_mapper(bits)
-
-    # 2. Ajustar tamaño al canal
     num_symbols = N * L
-    x = x[:num_symbols].reshape(N, L)
 
-    # 3. Transformar canal a frecuencia
-    H = np.fft.fft(h, axis=1)
-    # 4. Transmisión por canal
+    if mod_type == "QPSK":
+        bits = bits[:num_symbols * 2].reshape(-1, 2)
+
+        x = np.zeros(len(bits), dtype=complex)
+        x[(bits[:,0]==0)&(bits[:,1]==0)] = 1 + 1j
+        x[(bits[:,0]==0)&(bits[:,1]==1)] = 1 - 1j
+        x[(bits[:,0]==1)&(bits[:,1]==0)] = -1 + 1j
+        x[(bits[:,0]==1)&(bits[:,1]==1)] = -1 - 1j
+        x /= np.sqrt(2)
+
+    else:  # 16QAM
+        bits = bits[:num_symbols * 4].reshape(-1, 4)
+
+        mapping = {(0,0):-3, (0,1):-1, (1,1):1, (1,0):3}
+
+        x = np.array([
+            mapping[tuple(b[:2])] + 1j * mapping[tuple(b[2:])]
+            for b in bits
+        ])
+        x /= np.sqrt(10)
+
+    x = x.reshape(N, L)
+
+    H = np.fft.fft(h, axis=0)
     y = H * x
 
-    # 5. Añadir ruido
-    y = add_awgn(y, snr_db)
+    # AWGN
+    snr_db = 10
+    snr = 10**(snr_db/10)
+    noise_power = np.mean(np.abs(y)**2) / snr
+    noise = np.sqrt(noise_power/2) * (
+        np.random.randn(*y.shape) + 1j*np.random.randn(*y.shape)
+    )
 
-    # 6. Ecualización (invertir canal)
+    y += noise
+
+    # ZF equalization
     x_hat = y / (H + 1e-12)
 
-    # 7. Demodulación
-    rx_bits = qpsk_demapper(x_hat.reshape(-1))
+    x_hat = x_hat.reshape(-1)
 
-    # 8. Comparar bits transmitidos vs recibidos
-    bits = bits[:len(rx_bits)]
-    ber = np.mean(rx_bits != bits)
+    # demapper
+    if mod_type == "QPSK":
+        rx_bits = np.stack([
+            (np.real(x_hat) < 0),
+            (np.imag(x_hat) < 0)
+        ], axis=1).reshape(-1)
 
-    return ber
+        tx_bits = bits.reshape(-1)
+
+    else:
+        x_hat = x_hat * np.sqrt(10)
+
+        real = np.real(x_hat)
+        imag = np.imag(x_hat)
+
+        rx_bits = np.stack([
+            (real > 0),
+            (np.abs(real) < 2),
+            (imag > 0),
+            (np.abs(imag) < 2)
+        ], axis=1).reshape(-1)
+
+        tx_bits = bits.reshape(-1)
+
+    return np.mean(rx_bits != tx_bits)

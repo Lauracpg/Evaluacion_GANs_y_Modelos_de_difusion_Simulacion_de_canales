@@ -14,7 +14,7 @@
     },
 
     "dcgan": {
-      "z_dim": 64
+      "z_dim": 128
     },
 
     "wgan": {
@@ -22,24 +22,26 @@
     },
 
     "ddpm": {
-      "T": 1000,
-      "time_emb_dim": 32
+      "T": 500,
+      "time_emb_dim": 64
     },
 
     "ddim": {
-      "sampling_steps": 200,
-      "eta": 0.1
+      "T": 1000,
+      "time_emb_dim": 64,
+      "sampling_steps": 100,
+      "eta": 0.0
     }
   },
 
   "evaluation": {
-    "num_samples": 500,
+    "num_samples": 3000,
     "delta_tau": 1e-8
   },
 
   "paths": {
     "eval": {
-      "base_dir": "eval_results/datos_loopback"
+      "base_dir": "eval_results/datos_loopback/DDIM_sweep_2"
     }
   }
 }

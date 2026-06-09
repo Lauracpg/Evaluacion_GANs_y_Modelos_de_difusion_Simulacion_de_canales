@@ -101,14 +101,13 @@ def compute_histogram(signals, bins=50, range=(-1,1)):
     hist, edges = np.histogram(mags, bins=bins, range=range, density=True)
     return hist, edges[:-1]
 
-def compute_psd(signals, fs=1.0):
+def compute_psd(signals):
     """PSD promedio de las señales"""
-    psds = []
-    for s in signals:
-        f, Pxx = welch(s, fs=fs, nperseg=min(128,len(s)))
-        psds.append(Pxx)
-    psds = np.array(psds)
-    return np.mean(psds, axis=0), f
+    psd = np.abs(np.fft.rfft(signals, axis=-1)) ** 2
+    psd_mean = psd.mean(axis=0)
+
+    freqs = np.fft.rfftfreq(signals.shape[-1], d=1.0)
+    return psd_mean, freqs
 
 def evaluate_metrics(real, fake, delta_tau=1.0):
     m = {}
@@ -186,7 +185,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
     """
     L = config["data"]["signal_length"]
     z_dim = config["models"][model_type].get("z_dim", None)
-    ddpm_steps = config["models"][model_type].get("T", 1000)
+    dm_steps = config["models"][model_type].get("T", 1000)
     g = torch.Generator(device=device)
     g.manual_seed(seed)
 
@@ -237,7 +236,7 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
         unet.load_state_dict(checkpoint)
 
         # reconstruir DDPM con el mismo número de pasos T
-        ddpm = DDPM(unet, T=ddpm_steps).to(device)
+        ddpm = DDPM(unet, T=dm_steps).to(device)
         ddpm.model.eval()
 
         with torch.no_grad():
@@ -264,8 +263,6 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
                 )
             # guardar señal final x_0
             x0 = x
-            # energy = torch.sqrt(torch.sum(x0 ** 2, dim=2, keepdim=True))
-            # x0 = x0 / (energy + 1e-12)
             x0 = torch.clamp(x0, -1, 1)
             fake = x0.cpu().numpy()
 
@@ -283,8 +280,12 @@ def generate_signals(config, model_type, model_checkpoint, num_samples,
         unet.eval()
 
         data = np.load(config["data"]["path"]).astype(np.float32)
-        diffusion = Diffusion(unet, T=ddpm_steps, data=data).to(device)
-        sampler = DDIMSampler(diffusion, eta=config["models"]["ddim"]["eta"])  # determinista
+        diffusion = Diffusion(unet, T=dm_steps, data=data).to(device)
+
+        sampler = DDIMSampler(
+            diffusion,
+            eta=config["models"]["ddim"]["eta"],
+        )
 
         with torch.no_grad():
             return sampler.sample(
@@ -350,13 +351,15 @@ def main(args, config):
     h_real = real_eval[:, 0, :] + 1j*real_eval[:, 1, :]
     h_fake = fake_eval[:, 0, :] + 1j*fake_eval[:, 1, :]
 
-    # número de bits (QPSK = 2 bits por símbolo)
-    num_bits = 2 * h_real.__sizeof__()
+    N, L = h_real.shape
+    num_symbols = N * L
+    num_bits = num_symbols * 2  # QPSK
 
     bits = np.random.randint(0, 2, num_bits)
 
-    ber_real = compute_ber(h_real, bits, snr_db=10)
-    ber_fake = compute_ber(h_fake, bits, snr_db=10)
+    # BER
+    ber_real = compute_ber(h_real, bits, mod_type="QPSK")
+    ber_fake = compute_ber(h_fake, bits, mod_type="QPSK")
 
     print("\n--- BER ---")
     print(f"BER real: {ber_real:.6f}")
@@ -476,7 +479,6 @@ def write_metrics_file(args, metrics, ber_real=None, ber_fake=None):
         f.write("\n---- STATISTICAL INTERPRETATION ----\n")
         f.write(f"RMS comparison: {significance(metrics['rms_t_pvalue'])}\n")
         f.write(f"AVG delay comparison: {significance(metrics['avg_t_pvalue'])}\n")
-
 
 def plot_delay_distribution(args, metrics):
     plt.figure(figsize=(8, 4))
