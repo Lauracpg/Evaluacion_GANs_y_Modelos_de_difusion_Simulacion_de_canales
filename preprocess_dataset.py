@@ -61,16 +61,20 @@ def load_synthetic_data(file_path, L=128, save_path="data/datos_sinteticos/TDL_D
     H = H.T # (100000, 128)
     print(f"Shape canales: {H.shape}")
 
-    H_real = np.real(H)
-    H_imag = np.imag(H)
+    # 1. normalización física del canal
+    power = np.mean(np.abs(H) ** 2, axis=1, keepdims=True)
+    H = H / np.sqrt(power + 1e-12)
 
-    dataset = np.stack([H_real, H_imag], axis=1).astype(np.float32)
-    print("Shape dataset:", dataset.shape)
+    # 2. evita outliers
+    scale = np.percentile(np.abs(H), 99)
+    H = H / (scale + 1e-12)
 
-    # [-1, 1] global
+    # 3. pasar a real/imag
+    dataset = np.stack([H.real, H.imag], axis=1)
+    print("Shape dataset final:", dataset.shape)
+
     max_abs = np.max(np.abs(dataset))
     dataset = dataset / (max_abs + 1e-12)
-
     print("Rango final:", dataset.min(), dataset.max())
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -165,7 +169,7 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
     print("Canales totales:", total_channels)
     print("Shape final:", dataset.shape)
 
-    # [-1, 1] normalización
+    # # [-1, 1] normalización
     max_abs = np.max(np.abs(dataset))
     dataset = dataset / (max_abs + 1e-12)
 
@@ -328,22 +332,22 @@ def analyze_dataset(data, save_dir="data/datos_sinteticos", num_examples=5, heat
     print("\nAnálisis completado.")
 
 if __name__ == "__main__":
-    # data_sintetico = load_synthetic_data(
-    #     "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
-    #     L=128,
-    #     save_path="data/datos_sinteticos/dataset_synthetic.npy"
-    # )
-    # data_loopback = load_loopback_data(
-    #     "data/datos_loopback/new_ch_time_worst.mat",
-    #     L=200,
-    #     save_path="data/datos_loopback/new_ch_time_worst.npy"
-    # )
-    data_nist = load_nist_data(
-        "data/datos_reales/NIST_Samples.mat",
+    data_sintetico = load_synthetic_data(
+        "data/datos_sinteticos/TDL_D_85ns_fd1000_SNR20_h_real.npy",
         L=128,
-        save_path="data/datos_NIST/h_AAplant_5G/h_AAplant_5G.npy"
+        save_path="data/datos_sinteticos/dataset_synthetic.npy"
+    )
+    data_loopback = load_loopback_data(
+        "data/datos_loopback/new_ch_time_worst.mat",
+        L=200,
+        save_path="data/datos_loopback/new_ch_time_worst.npy"
+    )
+    data_nist = load_nist_data(
+        "data/datos_NIST/NIST_Samples.mat",
+        L=128,
+        save_path="data/datos_NIST/h_AAplant_5G.npy"
     )
 
-    #analyze_dataset(data_sintetico, save_dir="data/datos_sinteticos", filtrar_zeros=True,  eps=1e-6)
-    #analyze_dataset(data_loopback,  save_dir="data/datos_loopback",   filtrar_zeros=False)
-    analyze_dataset(data_nist, save_dir="data/datos_NIST/h_AAplant_5G",     filtrar_zeros=True,  eps=1e-4)
+    analyze_dataset(data_sintetico, save_dir="data/datos_sinteticos", filtrar_zeros=True,  eps=1e-6)
+    analyze_dataset(data_loopback,  save_dir="data/datos_loopback",   filtrar_zeros=False)
+    analyze_dataset(data_nist, save_dir="data/datos_NIST/h_AAplant_5G", filtrar_zeros=True,  eps=1e-4)
