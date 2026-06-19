@@ -88,13 +88,8 @@ def train_gan(G, D, loader, device, config):
     # El discriminador aprende a dar valores cercanos a:
     # 1 señal real
     # 0 señal falsa
-    loss_type = config["loss"]["type"]
-    if loss_type == "bce":
-        criterion = nn.BCEWithLogitsLoss()
-    elif loss_type == "mse":
-        criterion = nn.MSELoss()
-    else:
-        raise ValueError(f"Tipo de pérdida desconocido: {loss_type}")
+    criterion = nn.MSELoss()
+
     # optimizadores Adam para G y D
     optD = torch.optim.Adam(D.parameters(), lr=lr, betas=training["gan"]["betas"])
     optG = torch.optim.Adam(G.parameters(), lr=lr, betas=training["gan"]["betas"])
@@ -220,3 +215,8 @@ def train(config_path):
     D.apply(weights_init)
 
     train_gan(G, D, loader, device, config)
+
+if __name__ == "__main__":
+    import sys
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/gans_config.json"
+    train(config_path)

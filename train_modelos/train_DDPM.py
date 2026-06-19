@@ -211,3 +211,8 @@ def train(config_path):
         if epochs_no_improve >= config["training"]["patience"]:
             print(f"Early stopping")
             break
+
+if __name__ == "__main__":
+    import sys
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/dm_config.json"
+    train(config_path)

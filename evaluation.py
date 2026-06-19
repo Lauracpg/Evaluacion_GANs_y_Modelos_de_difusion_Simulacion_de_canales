@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import os
 import matplotlib.pyplot as plt
-from scipy.signal import welch
 from scipy.stats import ttest_ind
 from scipy.stats import gaussian_kde
 
@@ -657,7 +656,7 @@ def plot_results(args, metrics, real_mag, fake_mag):
     )
 
     plt.grid(True, alpha=0.3)
-    plt.title("PSD (db/Hz) Real vs Generado")
+    plt.title("PSD (dB/Hz) Real vs Generado")
     plt.xlabel("Frequency (Hz)")
     plt.legend()
     plt.tight_layout()

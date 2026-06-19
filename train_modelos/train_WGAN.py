@@ -318,3 +318,8 @@ def train(config_path):
         start_epoch=start_epoch,
         best_psd_score=best_psd_score
     )
+
+if __name__ == "__main__":
+    import sys
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/gans_config.json"
+    train(config_path)

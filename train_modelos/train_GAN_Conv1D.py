@@ -6,7 +6,7 @@ from torch.nn.utils import spectral_norm
 from torch.utils.data import TensorDataset, DataLoader
 import json
 
-def load_config(path="gans_config.json"):
+def load_config(path="../config/gans_config.json"):
     with open(path, "r") as f:
         return json.load(f)
 
@@ -77,16 +77,14 @@ def train_gan(G, D, loader, device, config):
 
     epochs = training["epochs"]
     lr = training["lr"]
+    min_delta = training["min_delta"]
+    patience = training["patience"]
     z_dim = model_cfg["z_dim"]
 
     betas = training["gan"]["betas"]
 
     # Función de pérdida binaria (real vs falso)
-    loss_type = config["loss"]["gan"]
-    if loss_type == "bce":
-        criterion = nn.BCEWithLogitsLoss()
-    else:
-        raise ValueError(f"Tipo de pérdida desconocido: {loss_type}")
+    criterion = nn.BCEWithLogitsLoss()
 
     # Optimizadores independientes para G y D
     optD = torch.optim.Adam(D.parameters(), lr=lr, betas=betas)
@@ -94,6 +92,7 @@ def train_gan(G, D, loader, device, config):
 
     # Mejor pérdida del generador (para guardar mejor modelo)
     best_g_loss = float("inf")
+    epochs_no_improve = 0
 
     ### Bucle del ENTRENAMIENTO principal ###
     for epoch in range(epochs):
@@ -116,7 +115,7 @@ def train_gan(G, D, loader, device, config):
             pred_fake = D(fake) # debe clasificar como 0
 
             # Etiquetas reales y falsas
-            real_labels = torch.full((bsize, 1), 0.9, device=device)
+            real_labels = torch.ones((bsize, 1), device=device)
             fake_labels = torch.zeros((bsize, 1), device=device)
 
             # Pérdida del discriminador:
@@ -155,20 +154,27 @@ def train_gan(G, D, loader, device, config):
         )
 
         # Guardar mejor modelo (según pérdida del generador)
-        if g_loss_epoch < best_g_loss:
+        if g_loss_epoch < best_g_loss - min_delta:
             best_g_loss = g_loss_epoch
+            epochs_no_improve = 0
 
             torch.save(
                 {
                     "G": G.state_dict(),
                     "D": D.state_dict(),
                     "epoch": epoch,
-                    "g_loss": best_g_loss,
+                    "g_loss": best_g_loss
                 },
                 os.path.join(paths["save_dir"], paths["best_model"]),
             )
 
             print(f"Nuevo mejor modelo en {epoch}")
+        else:
+            epochs_no_improve += 1
+
+        if epochs_no_improve >= patience:
+            print(f"Early stopping en época {epoch} (sin mejora en {patience} épocas)")
+            break
 
     print("Entrenamiento completado. Modelos guardados en", paths["save_dir"])
 
@@ -198,3 +204,8 @@ def train(config_path):
     D.apply(weights_init)
 
     train_gan(G, D, loader, device, config)
+
+if __name__ == "__main__":
+    import sys
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/gans_config.json"
+    train(config_path)
