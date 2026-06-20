@@ -3,11 +3,10 @@
     "model_type": ["ddim"]
   },
   "diffusion": {
-    "T": [200, 500],
-    "lambda_rms": [0.5, 1.0]
+    "T": [500, 1000]
   },
   "model": {
-    "time_emb_dim": [32, 64]
+    "time_emb_dim": [64]
   },
   "training": {
     "lr": [1e-4, 2e-4]

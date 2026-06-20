@@ -6,18 +6,18 @@
   },
 
   "dataset": {
-    "path": "data/datos_loopback/new_ch_time_worst.npy"
+    "path": "../data/datos_NIST/h_AAplant_5G/h_AAplant_5G.npy"
   },
 
   "model": {
-    "z_dim": 64,
-    "signal_length": 200
+    "z_dim": 128,
+    "signal_length": 128
   },
 
   "training": {
-    "epochs": 300,
+    "epochs": 400,
     "batch_size": 64,
-    "lr": 0.00005,
+    "lr": 0.0001,
 
     "gan": {
       "betas": [0.5, 0.999]
@@ -25,22 +25,16 @@
 
     "wgan": {
       "betas": [0.0, 0.9],
-      "n_critic": 5,
+      "n_critic": 10,
       "lambda_gp": 10.0,
-      "lambda_spec": 0.1
+      "lambda_spec": 0.01
     },
-    "patience": 50,
+    "patience": 150,
     "min_delta": 0.0001
   },
 
-  "loss": {
-    "type": "mse",
-    "gan": "bce",
-    "wgan": "wgan_gp"
-  },
-
   "paths": {
-    "save_dir": "checkpoints/datos_loopback/WGAN_Conv1D",
+    "save_dir": "../checkpoints/datos_NIST/h_AAplant_5G/wgan_z128_lr0.0001_bs64_lspec0.01",
     "best_model": "best_model.pth"
   }
 }

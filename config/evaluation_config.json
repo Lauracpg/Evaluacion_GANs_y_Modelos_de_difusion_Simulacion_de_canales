@@ -4,17 +4,17 @@
   },
 
   "data": {
-    "path": "data/datos_loopback/new_ch_time_worst.npy",
-    "signal_length": 200
+    "path": "data/datos_NIST/h_AAplant_5G/h_AAplant_5G.npy",
+    "signal_length": 128
   },
 
   "models": {
     "gan": {
-      "z_dim": 64
+      "z_dim": 128
     },
 
     "dcgan": {
-      "z_dim": 128
+      "z_dim": 64
     },
 
     "wgan": {
@@ -27,8 +27,8 @@
     },
 
     "ddim": {
-      "T": 1000,
-      "time_emb_dim": 64,
+      "T": 500,
+      "time_emb_dim": 32,
       "sampling_steps": 100,
       "eta": 0.0
     }
@@ -41,7 +41,7 @@
 
   "paths": {
     "eval": {
-      "base_dir": "eval_results/datos_loopback/DDIM_sweep_2"
+      "base_dir": "eval_results/datos_NIST/h_AAplant_5G/ddim_T500_lr0.0002_te32_sampling100"
     }
   }
 }

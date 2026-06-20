@@ -1,17 +1,17 @@
 {
   "experiment": {
-    "model_type": ["wgan"]
+    "model_type": ["dcgan"]
   },
   "model": {
     "z_dim": [128]
   },
   "training": {
     "lr": [0.0001],
-    "batch_size": [64],
+    "batch_size": [128],
     "wgan": {
-      "n_critic": [5, 10],
+      "n_critic": [3, 5],
       "lambda_gp": [10],
-      "lambda_spec": [0.01, 0.05, 0.1],
+      "lambda_spec": [0.01, 0.05],
       "betas": [[0.0, 0.9]]
     }
   }

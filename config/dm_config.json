@@ -1,37 +1,36 @@
 {
   "experiment": {
-    "name": "loopback_diffusion",
+    "name": "synthetic_diffusion",
     "seed": 42
   },
 
   "dataset": {
-    "path": "data/datos_loopback/new_ch_time_worst.npy",
-    "type": "loopback"
+    "path": "../data/datos_NIST/h_AAplant_5G/h_AAplant_5G.npy",
+    "type": "NIST"
   },
 
   "model": {
-    "time_emb_dim": 64
+    "time_emb_dim": 32
   },
 
   "diffusion": {
     "schedule": "cosine",
     "use_tap_weights": true,
-    "T": 1000,
-    "lambda_rms": 1.0
+    "T": 500
   },
 
   "training": {
     "epochs": 500,
     "batch_size": 64,
     "lr": 0.0002,
-    "patience": 80,
-    "min_delta": 0.000005,
+    "patience": 50,
+    "min_delta": 0.001,
     "num_workers": 0,
-    "grad_clip": 1.0
+    "grad_clip": 5.0
   },
 
   "paths": {
-    "save_dir": "checkpoints/datos_loopback/ddpm",
+    "save_dir": "../checkpoints/datos_NIST/h_AAplant_5G/DDIM/ddim_T500_lr0.0002_te32",
     "best_model": "best_model.pth"
   }
 }
