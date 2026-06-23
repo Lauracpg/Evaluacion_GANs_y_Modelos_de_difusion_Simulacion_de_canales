@@ -2,7 +2,7 @@ import json
 from train_modelos.train_DDPM import train as train_ddpm
 from train_modelos.train_DDIM import train as train_ddim
 from train_modelos.train_GAN_Conv1D import train as train_gan
-from train_modelos.train_WGAN import train as train_wgan
+from train_modelos.train_WGAN_Conv1D import train as train_wgan
 from train_modelos.train_DCGAN_Conv1D import train as train_dcgan
 
 def load_config(path):
