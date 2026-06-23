@@ -1,4 +1,5 @@
 import json
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +15,7 @@ def load_config(path="dm_config.json"):
 # Denoising diffusion probabilistic model DDPM
 class ConvBlock(nn.Module):
     """
-    Bloque básico Conv1D para la U-Net
+    Bloque Conv1D para la U-Net
     """
     def __init__(self, in_c, out_c):
         super().__init__()
@@ -41,10 +42,10 @@ class TimeEmbedding(nn.Module):
         # Frecuencias logarítmicamente espaciadas
         emb = math.log(10000) / (half - 1)
         emb = torch.exp(torch.arange(half, device=t.device) * -emb)
-        # embedding sinusoidal tipo Transformer
+        # Embedding sinusoidal tipo Transformer
         emb = t.float()[:, None] * emb[None, :]
         emb = torch.cat([emb.sin(), emb.cos()], dim=1)
-        # salida: (batch, dim)
+        # Salida: (batch, dim)
         return emb
 
 class UNet1D(nn.Module):
@@ -56,16 +57,17 @@ class UNet1D(nn.Module):
             nn.Linear(time_emb_dim, 256),
             nn.SiLU()
         )
-        # Encoder (downsampling)
+
+        # Encoder (downsampling):
         # extrae características a distintas escalas temporales
         self.down1 = ConvBlock(2, 64)
         self.down2 = ConvBlock(64, 128)
         self.pool = nn.MaxPool1d(2)
-        # Bottleneck
+        # Bottleneck:
         # parte central donde se inyecta la información temporal
         self.mid = ConvBlock(128, 256)
-        # Decoder (unsampling)
-        # reconstruye la señal combinando información fina y gruesa
+        # Decoder (upsampling):
+        # reconstruye la señal combinando información
         self.up1 = ConvBlock(256 + 128, 128)
         self.up2 = ConvBlock(128 + 64, 64)
         # Capa final: predicción del ruido (misma dimensión que la señal)
@@ -107,11 +109,7 @@ def cosine_beta_schedule(T):
     return torch.clip(betas, 0.0001, 0.999)
 
 class DDPM(nn.Module):
-    """
-    - proceso forward (añadir ruido)
-    - función de pérdida
-    """
-    def __init__(self, model, T=1000):
+    def __init__(self, model, T=500):
         super().__init__()
         self.model = model
         self.T = T
@@ -126,9 +124,7 @@ class DDPM(nn.Module):
         self.register_buffer('sqrt_one_minus', torch.sqrt(1 - alphas_cumprod))
 
     def q_sample(self, x0, t, noise):
-        """
-        Aplicar el proceso forward:
-        """
+        # Aplicar el proceso forward
         # Añade ruido a la señal original según el timestep t
         # x_t = mezcla de señal limpia + ruido
         return (
@@ -137,9 +133,7 @@ class DDPM(nn.Module):
         )
 
     def loss(self, x0):
-        """
-        Función de pérdida
-        """
+        # Función de pérdida
         b = x0.size(0)
         # timestep aleatorio por muestra
         t = torch.randint(0, self.T, (b,), device=x0.device)
@@ -153,9 +147,7 @@ class DDPM(nn.Module):
         return F.mse_loss(noise_pred, noise)
 
 def train(config_path):
-    """
-    Bucle principal de entrenamiento del DDPM.
-    """
+    # Bucle principal de entrenamiento
     config = load_config(config_path)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(config["paths"]["save_dir"], exist_ok=True)
@@ -182,7 +174,7 @@ def train(config_path):
         loss_avg = 0.0
 
         for (x,) in loader:
-            # x = señal real
+            # x: señal real
             x = x.to(device)
             loss = ddpm.loss(x) # aprendizaje de denoising
 
@@ -213,6 +205,5 @@ def train(config_path):
             break
 
 if __name__ == "__main__":
-    import sys
     config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/dm_config.json"
     train(config_path)

@@ -5,11 +5,8 @@ from matplotlib import pyplot as plt
 
 def load_loopback_data(mat_path, L=200, save_path="data/dataset_loopback.npy"):
     print(f"Cargando archivo: {mat_path} ...")
-
     f = h5py.File(mat_path, "r")
-
     H_struct = f["est_RX_t"][...]
-
     print("Shape original:", H_struct.shape)
     print("dtype:", H_struct.dtype)
 
@@ -19,7 +16,6 @@ def load_loopback_data(mat_path, L=200, save_path="data/dataset_loopback.npy"):
     H = H_real + 1j * H_imag
 
     print("Shape complejo:", H.shape)
-
     H = H[:, :L]
     print(f"Shape tras recorte a L={L}:", H.shape)
 
@@ -32,7 +28,6 @@ def load_loopback_data(mat_path, L=200, save_path="data/dataset_loopback.npy"):
     H_imag = H_imag / (energy + 1e-12)
 
     dataset = np.stack([H_real, H_imag], axis=1).astype(np.float32)
-
     print("Shape dataset final:", dataset.shape)
 
     max_abs = np.max(np.abs(dataset))
@@ -41,9 +36,7 @@ def load_loopback_data(mat_path, L=200, save_path="data/dataset_loopback.npy"):
     print("Rango final:", dataset.min(), dataset.max())
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
     np.save(save_path, dataset)
-
     print("Dataset guardado en:", save_path)
 
     return dataset
@@ -65,11 +58,11 @@ def load_synthetic_data(file_path, L=128, save_path="data/datos_sinteticos/TDL_D
     power = np.mean(np.abs(H) ** 2, axis=1, keepdims=True)
     H = H / np.sqrt(power + 1e-12)
 
-    # 2. evita outliers
+    # 2. Evita outliers
     scale = np.percentile(np.abs(H), 99)
     H = H / (scale + 1e-12)
 
-    # 3. pasar a real/imag
+    # 3. Pasar a real/imag
     dataset = np.stack([H.real, H.imag], axis=1)
     print("Shape dataset final:", dataset.shape)
 
@@ -92,13 +85,6 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
     for k in keys:
         print(" ", k)
 
-    # extraer todas las matrices que empiezan por "h_"
-    # channel_keys = [k for k in keys if k.startswith("h_")]
-
-    # print("\nMatrices de canal encontradas:")
-    # for ck in channel_keys:
-    #     print(" ", ck)
-
     channel_keys = ["h_AAplant_5G"]
 
     if channel_keys[0] not in keys:
@@ -115,12 +101,12 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
         print(f"\nProcesando {ck} ...")
 
         H_raw = f[ck] # matriz 241 x YYY
-        # conservar el dtype estructurado
+        # Conservar el dtype estructurado
         H_struct = H_raw[...]
 
         print("dtype:", H_struct.dtype)
 
-        # reconstruir números complejos
+        # Reconstruir números complejos
         H_real = np.nan_to_num(H_struct["real"], nan=0.0)
         H_imag = np.nan_to_num(H_struct["imag"], nan=0.0)
         H = H_real + 1j * H_imag
@@ -135,17 +121,17 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
         # H es 241 x YYY, YYY = número de canales
         print("Shape actual (debería ser 241 x N):", H.shape)
 
-        # recortar a 128 muestras
+        # Recortar a 128 muestras
         H_crop = H[:L, :] # shape: L x num_canales
         print("Shape tras recorte a L=128:", H_crop.shape)
-        # convertir columnas -> filas
+        # Convertir columnas -> filas
         H_crop = H_crop.T
         print(" Shape (canales x L):", H_crop.shape)
 
         num_c = H_crop.shape[0]
         total_channels += num_c
 
-        # Separar real e imaginario (SIN normalizar todavía)
+        # Separar real e imaginario (sin normalizar todavía)
         H_real = np.real(H_crop)
         H_imag = np.imag(H_crop)
 
@@ -154,13 +140,12 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
         H_real = H_real / (energy + 1e-12)
         H_imag = H_imag / (energy + 1e-12)
 
-
         H_2_channel = np.stack([H_real, H_imag], axis=1)
         all_channels.append(H_2_channel.astype(np.float32))
 
         print(f"Añadidos {num_c} canales")
 
-    # juntar todos los canales
+    # Juntar todos los canales
     dataset = np.vstack(all_channels)
 
     print("\n" + "=" * 60)
@@ -176,7 +161,7 @@ def load_nist_data(mat_path, L=128, save_path="data/datos_reales/dataset_nist.np
     print("Max absoluto global:", max_abs)
     print("Rango final:", dataset.min(), dataset.max())
 
-    # guardar
+    # Guardar
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     np.save(save_path, dataset)
 

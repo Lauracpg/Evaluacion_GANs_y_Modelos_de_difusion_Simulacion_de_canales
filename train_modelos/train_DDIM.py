@@ -1,3 +1,4 @@
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -36,11 +37,11 @@ class TimeEmbedding(nn.Module):
     def forward(self, t):
         half = self.dim // 2
 
-        # frecuencias exponenciales
+        # Frecuencias exponenciales
         emb = math.log(10000) / (half - 1)
         emb = torch.exp(torch.arange(half, device=t.device) * -emb)
 
-        # codificación sinusoidal
+        # Codificación sinusoidal
         emb = t.float()[:, None] * emb[None, :]
         emb = torch.cat([emb.sin(), emb.cos()], dim=1)
         return emb
@@ -49,45 +50,45 @@ class UNet1D(nn.Module):
     def __init__(self, time_emb_dim=64):
         super().__init__()
 
-        # embedding del tiempo
+        # Embedding del tiempo
         self.time_mlp = nn.Sequential(
             TimeEmbedding(time_emb_dim),
             nn.Linear(time_emb_dim, 256),
             nn.SiLU()
         )
 
-        # encoder
+        # Encoder
         self.down1 = ConvBlock(2, 64)
         self.down2 = ConvBlock(64, 128)
         # reduce resolución
         self.pool = nn.MaxPool1d(2)
 
-        # capa intermedia (representación comprimida)
+        # Capa intermedia (representación comprimida)
         self.mid = ConvBlock(128, 256)
 
-        # decoder
+        # Decoder
         self.up1 = ConvBlock(256 + 128, 128)
         self.up2 = ConvBlock(128 + 64, 64)
 
-        # salida: predicción del ruido
+        # Salida: predicción del ruido
         self.final = nn.Conv1d(64, 2, 1)
 
     def forward(self, x, t):
-        # embedding del timestep
+        # Embedding del timestep
         t_emb = self.time_mlp(t).unsqueeze(-1)
 
-        # encoder
+        # Encoder
         x1 = self.down1(x)
         x2 = self.down2(self.pool(x1))
 
-        # representación comprimida
+        # Representación comprimida
         x_mid = self.mid(self.pool(x2))
 
-        # añadir información del tiempo
+        # Añadir información del tiempo
         t_emb = t_emb.expand(-1, -1, x_mid.size(2))
         x_mid = x_mid + t_emb
 
-        # decoder
+        # Decoder
         x = F.interpolate(x_mid, size=x2.shape[-1])
         x = self.up1(torch.cat([x, x2], dim=1))
 
@@ -96,7 +97,7 @@ class UNet1D(nn.Module):
 
         return self.final(x)
 
-# SCHEDULE DE RUIDO
+# Schedule de ruido
 def cosine_beta_schedule(T):
     s = 0.008
     steps = T + 1
@@ -123,11 +124,8 @@ class Diffusion(nn.Module):
         # producto acumulado
         alpha_bar = torch.cumprod(alphas, dim=0)
 
-        # guardar constantes
-        self.register_buffer('betas', betas)
-        self.register_buffer('alphas', alphas)
+        # Guardar constantes
         self.register_buffer('alpha_bar', alpha_bar)
-
         self.register_buffer('sqrt_alpha_bar', torch.sqrt(alpha_bar))
         self.register_buffer('sqrt_one_minus', torch.sqrt(1 - alpha_bar))
 
@@ -143,7 +141,7 @@ class Diffusion(nn.Module):
 
         self.register_buffer('tap_weights', tap_weights)
 
-    # FORWARD DIFFUSION
+    # Forward:
     # genera xt a partir de x0
     # mezcla señal original + ruido gaussiano
     def q_sample(self, x0, t, noise):
@@ -152,24 +150,23 @@ class Diffusion(nn.Module):
             self.sqrt_one_minus[t][:, None, None] * noise
         )
 
-    # FUNCIÓN DE PÉRDIDA
-    # la red aprende a predecir el ruido añadido
-    # objetivo: epsilon_theta(xt, t) = epsilon
+    # Función de pérdida
+    # Objetivo: epsilon_theta(xt, t) = epsilon
     def loss(self, x0):
         b = x0.size(0)
 
-        # elegir paso aleatorio
+        # Elegir paso aleatorio
         t = torch.randint(0, self.T, (b,), device=x0.device)
         # ruido gaussiano
         noise = torch.randn_like(x0)
 
-        # generar señal ruidosa
+        # Generar señal ruidosa
         xt = self.q_sample(x0, t, noise)
 
         # predicción del ruido
         noise_pred = self.model(xt, t)
 
-        # pesos con forma (1, 1, L) para broadcasting
+        # Pesos con forma (1, 1, L) para broadcasting
         weights = self.tap_weights.view(1, 1, -1)
         loss_noise = (weights * (noise_pred - noise) ** 2).mean()
 
@@ -177,7 +174,7 @@ class Diffusion(nn.Module):
         x0_pred = (xt - torch.sqrt(1 - a_t) * noise_pred) / torch.sqrt(a_t + 1e-8)
         x0_pred = torch.clamp(x0_pred, -1, 1)
 
-        # pérdida espectral, penaliza desviaciones en PSD en log-escala
+        # Pérdida espectral, penaliza desviaciones en PSD en log-escala
         real_psd = torch.abs(torch.fft.rfft(x0, dim=-1)) ** 2
         pred_psd = torch.abs(torch.fft.rfft(x0_pred, dim=-1)) ** 2
         real_psd = real_psd / (real_psd.sum(dim=-1, keepdim=True) + 1e-8)
@@ -194,15 +191,15 @@ class DDIMSampler:
         self.model = diffusion.model
         self.T = diffusion.T
 
-        # controla aleatoriedad, eta=0 proceso determinista
+        # Controla aleatoriedad, eta=0 proceso determinista
         self.eta = eta
         self.alpha_bar = diffusion.alpha_bar
 
     @torch.no_grad()
     def sample(self, shape, device, steps=50):
-        # comenzar desde ruido gaussiano puro
+        # Comienza desde ruido gaussiano puro
         x = torch.randn(shape, device=device)
-        # seleccionar subconjunto de timesteps
+        # Seleccionar subconjunto de timesteps
         time_steps = torch.linspace(self.T - 1, 0, steps, device=device).long()
 
         for i in range(len(time_steps) - 1):
@@ -210,17 +207,17 @@ class DDIMSampler:
             t_next = time_steps[i + 1]
             t_batch = torch.full((shape[0],), t, device=device)
 
-            # estimar ruido presente en la señal
+            # Estimar ruido presente en la señal
             eps = self.model(x, t_batch)
 
             a_t = self.alpha_bar[t].view(1, 1, 1)
             a_next = self.alpha_bar[t_next].view(1, 1, 1)
 
-            # estimación de la señal limpia x0 = (xt - ruido) / escala
+            # Estimación de la señal limpia x0 = (xt - ruido) / escala
             x0_pred = (x - torch.sqrt(1 - a_t) * eps) / torch.sqrt(a_t + 1e-8)
             x0_pred = torch.clamp(x0_pred, -1.0, 1.0)
 
-            # controla cantidad de ruido extra
+            # Controla cantidad de ruido extra
             sigma = self.eta * torch.sqrt(
                 (1 - a_next) / (1 - a_t + 1e-8)
                 * (1 - a_t / (a_next + 1e-8))
@@ -228,14 +225,14 @@ class DDIMSampler:
 
             noise = torch.randn_like(x) if self.eta > 0 else 0
 
-            # ecuación DDIM: combina señal estimada limpia, dirección del ruido y ruido opcional
+            # Ecuación DDIM: combina señal estimada limpia, dirección del ruido y ruido opcional
             x = (
                 torch.sqrt(a_next) * x0_pred +
                 torch.sqrt(torch.clamp(1 - a_next - sigma ** 2, min=0)) * eps +
                 sigma * noise
             )
 
-        # último paso: señal limpia
+        # Último paso: señal limpia
         # en t=0: extrae x0 limpio
         t_last = time_steps[-1]
         t_batch = torch.full((shape[0],), t_last, device=device)
@@ -253,7 +250,6 @@ def train(config_path):
     os.makedirs(config["paths"]["save_dir"], exist_ok=True)
 
     data_np = np.load(config["dataset"]["path"])
-
     data = torch.from_numpy(data_np).float()
 
     loader = DataLoader(
@@ -264,7 +260,6 @@ def train(config_path):
     )
 
     model = UNet1D(time_emb_dim=config["model"]["time_emb_dim"]).to(device)
-
     diffusion = Diffusion(
         model,
         T=config["diffusion"]["T"],
@@ -291,7 +286,7 @@ def train(config_path):
             opt.zero_grad()
             loss.backward()
 
-            # evita el nan por exploding gradient
+            # Evita NAN por exploding gradient
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(),
                 config["training"]["grad_clip"]
@@ -324,6 +319,5 @@ def train(config_path):
 
 
 if __name__ == "__main__":
-    import sys
     config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/dm_config.json"
     train(config_path)

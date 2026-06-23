@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
         exp_name = build_experiment_name(cfg)
 
-        save_dir = f"checkpoints/datos_loopback/sweep_wgan_2/{exp_name}"
+        save_dir = f"checkpoints/datos_sinteticos/sweep_wgan/{exp_name}"
         os.makedirs(save_dir, exist_ok=True)
 
         done_flag = os.path.join(save_dir, "done.txt")

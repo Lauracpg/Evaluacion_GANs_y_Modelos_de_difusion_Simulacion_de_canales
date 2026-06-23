@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 import numpy as np
 import torch
 from torch import nn
@@ -50,12 +51,10 @@ class Generator(nn.Module):
         x = x.view(z.size(0), 256, self.init_len)
         x = self.bn0(x)
         x = self.net(x)
-        # energy = torch.sqrt(torch.sum(x ** 2, dim=2, keepdim=True))
-        # x = x / (energy + 1e-12)
         x = x[:, :, :self.L]
         return x
 
-# ----- DISCRIMINATOR Conv1D ----- #
+# ----- CRITIC ----- #
 class Discriminator(nn.Module):
     def __init__(self, L):
         super().__init__()
@@ -79,7 +78,7 @@ class Discriminator(nn.Module):
         f = f.view(x.size(0), -1)
         return self.fc(f)
 
-### Inicialización ###
+# Inicialización
 def weights_init(m):
     if isinstance(m, (nn.Conv1d, nn.ConvTranspose1d, nn.Linear)):
         nn.init.normal_(m.weight, 0.0, 0.02)
@@ -113,26 +112,22 @@ def gradient_penalty(critic, real, fake, device):
     gp = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
     return gp
 
-def compute_pdp(x):
-    return torch.mean(x ** 2, dim=0)
-
-# pérdida espectral psd
+# Pérdida espectral PSD entrenamiento
 def spectral_loss(real, fake):
     real_psd = torch.log(torch.abs(torch.fft.rfft(real, dim=-1)) ** 2 + 1e-8)
     fake_psd = torch.log(torch.abs(torch.fft.rfft(fake, dim=-1)) ** 2 + 1e-8)
     return F.mse_loss(fake_psd, real_psd)
 
-# métrica de evaluación por época
+# Métrica de evaluación PSD por época
 def psd_similarity(real, fake):
-    """MSE entre PSDs medianas en log-escala. Cuanto menor, mejor."""
     with torch.no_grad():
         real_psd = torch.log(torch.abs(torch.fft.rfft(real, dim=-1)) ** 2 + 1e-8).mean(dim=0)
         fake_psd = torch.log(torch.abs(torch.fft.rfft(fake, dim=-1)) ** 2 + 1e-8).mean(dim=0)
         return F.mse_loss(fake_psd, real_psd).item()
 
 def train_gan(G, C, loader, device, config, start_epoch=1, best_psd_score=float("inf")):
-    # El critic no clasifica, asigna una "energía" o score real-valued
-    # Objetivo: aproximar la distancia entre distribuciones (Wasserstein)
+    # El critic asigna un score
+    # Objetivo: aproximar la distancia Wasserstein entre distribuciones
     training = config["training"]
     paths = config["paths"]
     model_cfg = config["model"]
@@ -165,9 +160,7 @@ def train_gan(G, C, loader, device, config, start_epoch=1, best_psd_score=float(
             real = real_batch.to(device)
             bsize = real.size(0)
 
-            # WGAN usa múltiples pasos del critic por cada paso del generador
-            # (el critic debe ser más fuerte para estimar bien la distancia)
-
+            # Múltiples pasos del critic por cada paso del generador
             ### TRAIN CRITIC ###
             for _ in range(n_critic):
                 z = torch.randn(bsize, model_cfg["z_dim"], device=device)
@@ -176,7 +169,7 @@ def train_gan(G, C, loader, device, config, start_epoch=1, best_psd_score=float(
                 real_score = C(real).mean()
                 fake_score = C(fake).mean()
 
-                # Wasserstein loss: diferencia de expectativas
+                # Wasserstein loss
                 loss_C = -(real_score - fake_score)
 
                 # Gradient penalty para imponer restricción Lipschitz
@@ -188,11 +181,11 @@ def train_gan(G, C, loader, device, config, start_epoch=1, best_psd_score=float(
                 loss_total.backward()
                 optC.step()
 
-            # después de entrenar el critic, usamos los mismos batches de real/fake para W_dist
+            # después de entrenar el critic, usa los mismos batches de real/fake para W_dist
             with torch.no_grad():
                 z = torch.randn(bsize, model_cfg["z_dim"], device=device)
                 fake_for_wdist = G(z)
-                # No es una loss de clasificación: es una estimación de la distancia entre distribuciones
+                # Estimación de la distancia entre distribuciones
                 w_dist_epoch += (C(real).mean() - C(fake_for_wdist).mean()).item()
 
             ### TRAIN GENERADOR ###
@@ -207,7 +200,7 @@ def train_gan(G, C, loader, device, config, start_epoch=1, best_psd_score=float(
             loss_G.backward()
             optG.step()
 
-            # métricas de monitoreo
+            # Métricas de monitoreo
             with torch.no_grad():
                 z2 = torch.randn(bsize, model_cfg["z_dim"], device=device)
                 fake_eval = G(z2)
@@ -283,7 +276,6 @@ def train(config_path):
     best_psd_score = float("inf")
 
     if os.path.exists(best_model_path):
-
         print(f"Cargando modelo existente: {best_model_path}")
 
         checkpoint = torch.load(
@@ -301,25 +293,13 @@ def train(config_path):
             f"Reanudando desde epoch {checkpoint['epoch']} "
             f"(PSD={best_psd_score:.6f})"
         )
-
     else:
         G.apply(weights_init)
         C.apply(weights_init)
 
-    G.apply(weights_init)
-    C.apply(weights_init)
-
-    train_gan(
-        G,
-        C,
-        loader,
-        device,
-        config,
-        start_epoch=start_epoch,
-        best_psd_score=best_psd_score
-    )
+    train_gan(G, C, loader, device, config,
+              start_epoch=start_epoch, best_psd_score=best_psd_score)
 
 if __name__ == "__main__":
-    import sys
     config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/gans_config.json"
     train(config_path)

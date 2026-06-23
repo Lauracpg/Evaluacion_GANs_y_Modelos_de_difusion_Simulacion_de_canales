@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 import torch
 from torch import nn
@@ -53,7 +54,7 @@ class Discriminator(nn.Module):
             spectral_norm(nn.Conv1d(64, 128, 4, 2, 1)),
             nn.LeakyReLU(0.2),
         )
-        # Capa final: clasificación binaria (real vs falso)
+        # Capa final
         self.fc = spectral_norm(nn.Linear(128 * (L // 8), 1))
 
     def forward(self, x):
@@ -90,7 +91,7 @@ def train_gan(G, D, loader, device, config):
     optD = torch.optim.Adam(D.parameters(), lr=lr, betas=betas)
     optG = torch.optim.Adam(G.parameters(), lr=lr, betas=betas)
 
-    # Mejor pérdida del generador (para guardar mejor modelo)
+    # Mejor pérdida del generador
     best_g_loss = float("inf")
     epochs_no_improve = 0
 
@@ -107,8 +108,8 @@ def train_gan(G, D, loader, device, config):
             optD.zero_grad()
             # Generar muestras falsas
             z = torch.randn(bsize, z_dim, device=device)
+            # detach evita actualizar el generador en esta fase
             fake = G(z).detach()
-            # detach() evita actualizar el generador en esta fase
 
             # Predicciones del discriminador
             pred_real = D(real) # debe clasificar como 1
@@ -119,7 +120,7 @@ def train_gan(G, D, loader, device, config):
             fake_labels = torch.zeros((bsize, 1), device=device)
 
             # Pérdida del discriminador:
-            # - aprender a distinguir real vs falso
+            # aprender a distinguir real vs falso
             loss_real = criterion(pred_real, real_labels)
             loss_fake = criterion(pred_fake, fake_labels)
 
@@ -134,7 +135,7 @@ def train_gan(G, D, loader, device, config):
             z = torch.randn(bsize, z_dim, device=device)
             fake = G(z)
 
-            # El generador intenta engañar al discriminador:
+            # El generador intenta engañar al discriminador
             pred_fake = D(fake)
             lossG = criterion(pred_fake, real_labels)
 
@@ -167,7 +168,6 @@ def train_gan(G, D, loader, device, config):
                 },
                 os.path.join(paths["save_dir"], paths["best_model"]),
             )
-
             print(f"Nuevo mejor modelo en {epoch}")
         else:
             epochs_no_improve += 1
@@ -206,6 +206,5 @@ def train(config_path):
     train_gan(G, D, loader, device, config)
 
 if __name__ == "__main__":
-    import sys
     config_path = sys.argv[1] if len(sys.argv) > 1 else "../config/gans_config.json"
     train(config_path)
