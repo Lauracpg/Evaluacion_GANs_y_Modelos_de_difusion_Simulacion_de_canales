@@ -48,6 +48,28 @@ project
     └── evaluation_config.json
 ```
 ---
+### Descripción de los archivos
+
+| Archivo                  | Descripción                                                                                                |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `preprocess_dataset.py`  | Carga, preprocesamiento y normalización de los datasets de canal.                                          |
+| `train_router.py`        | Selección y ejecución automática del entrenamiento según la arquitectura especificada en la configuración. |
+| `gan_run_sweep.py`       | Ejecución de barridos de hiperparámetros para las arquitecturas GAN, DCGAN y WGAN-GP.                      |
+| `dm_run_sweep.py`        | Ejecución de barridos de hiperparámetros para las arquitecturas DDPM y DDIM.                               |
+| `train_GAN_Conv1D.py`    | Implementación y entrenamiento del modelo GAN basado en convoluciones 1D.                                  |
+| `train_DCGAN_Conv1D.py`  | Implementación y entrenamiento del modelo DCGAN basado en convoluciones 1D.                                |
+| `train_WGAN_Conv1D.py`   | Implementación y entrenamiento del modelo WGAN-GP basado en convoluciones 1D.                              |
+| `train_DDPM.py`          | Implementación y entrenamiento del modelo DDPM.                                                            |
+| `train_DDIM.py`          | Implementación y entrenamiento del modelo DDIM.                                                            |
+| `evaluation.py`          | Generación de muestras sintéticas y evaluación mediante métricas estadísticas y físicas del canal.         |
+| `BER.py`                 | Cálculo de la tasa de error de bit (BER).                                                                  |
+| `gans_config.json`       | Configuración de entrenamientos individuales para GAN, DCGAN y WGAN-GP.                                    |
+| `dm_config.json`         | Configuración de entrenamientos individuales para DDPM y DDIM.                                             |
+| `gans_sweep_config.json` | Valores de hiperparámetros evaluados en los barridos de GAN, DCGAN y WGAN-GP.                              |
+| `dm_sweep_config.json`   | Valores de hiperparámetros evaluados en los barridos de DDPM y DDIM.                                       |
+| `evaluation_config.json` | Configuración del proceso de evaluación de los modelos entrenados.                                         |
+
+---
 ## Librerías utilizadas
 
 * PyTorch
@@ -61,7 +83,6 @@ project
 * copy
 * itertools
 * os
-
 ---
 ## Flujo de ejecución
 
@@ -147,8 +168,9 @@ Las métricas calculadas incluyen:
 
 Para cada experimento se guardan:
 
-* Checkpoints del modelo
-* Configuración utilizada
+* Checkpoints del modelo entrenado
 * Métricas de evaluación
 * Gráficas generadas
-* Resultados BER
+* Resultados de BER
+
+En los barridos de hiperparámetros también se guarda automáticamente la configuración asociada a cada experimento.
